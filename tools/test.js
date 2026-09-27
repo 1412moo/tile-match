@@ -85,6 +85,12 @@ console.log('[0] 문법 / 버전 일치 / 게임 목록 파일 검사');
   const APP_NAME = '엄마 게임천국';
   const mf = JSON.parse(read('manifest.webmanifest'));
   if (mf.name !== APP_NAME || mf.short_name !== APP_NAME) fail(`manifest 앱 이름: ${mf.name} / ${mf.short_name}`);
+  // 아이콘 주소의 ?v= 도 현재 버전 (아이콘을 바꿨을 때 예전 그림이 캐시에서 나오지 않게)
+  for (const ic of mf.icons) {
+    const [file, q] = ic.src.split('?');
+    if (q !== `v=${swV}`) fail(`manifest 아이콘 버전 태그: ${ic.src} (sw.js VERSION=${swV})`);
+    if (!fs.existsSync(path.join(ROOT, file))) fail(`manifest 아이콘 파일 없음: ${file}`);
+  }
   for (const h of htmls) {
     const html = read(h);
     for (const meta of ['application-name', 'apple-mobile-web-app-title']) {
