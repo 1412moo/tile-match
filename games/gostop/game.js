@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 12; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 13; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -112,10 +112,6 @@
     }
     return {
       unlock: ensure, slap,
-      // '촥': 더미에서 패를 뒤집는 소리
-      flip: () => noise({ dur: 0.1, freq: 900, freqTo: 3800, q: 1.3, vol: 0.4, attack: 0.02 }),
-      // '착': 먹은 패가 내 더미에 쌓이는 소리
-      take: () => { noise({ dur: 0.04, freq: 3200, q: 1.6, vol: 0.45 }); tone(700, 0, 0.04, 'sine', 0.06); },
       // '쓱-': 상대 피를 끌어오는 소리 + 짧은 '띵'
       steal: () => { noise({ dur: 0.22, freq: 3400, freqTo: 900, q: 1.1, vol: 0.35, attack: 0.03 }); tone(1320, 0.17, 0.14, 'triangle', 0.13); },
       // '슥': 더미에서 한 장 받아 손으로
@@ -572,7 +568,7 @@
       const to = FX.rectOf(floorEl(id));
       await flyCard(id, from[i], to, { dur: T.play, flip: p === 1, strong: hadMatch },
         () => {
-          sfx.slap(hadMatch);
+          sfx.slap();
           if (hadMatch) floorIds().filter(f => same(f, id) && !ids.includes(f)).forEach(f => FX.bump(floorEl(f)));
         });
     })());
@@ -590,8 +586,7 @@
       view.capAdd[p].push(b);
       hidden.add(b);
       render();
-      sfx.flip();
-      await flyCard(b, from, FX.rectOf(pileEl(p, b)) || pileRect(p), { dur: T.flip + 60, flip: true, pop: 0.4 }, () => sfx.take());
+      await flyCard(b, from, FX.rectOf(pileEl(p, b)) || pileRect(p), { dur: T.flip + 60, flip: true, pop: 0.4 }, () => sfx.slap());
       if (S !== game) return undefined;
       await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', '한 장 더 뒤집어요', 650);
       if (S !== game) return undefined;
@@ -603,9 +598,8 @@
     view.floorAdd = [d];
     hidden.add(d);
     render();
-    sfx.flip();
     await flyCard(d, from, FX.rectOf(floorEl(d)), { dur: T.flip, flip: true, pop: 0.42, strong: hit },
-      () => { sfx.slap(hit); if (hit) floorIds().filter(f => same(f, d)).forEach(f => FX.bump(floorEl(f))); });
+      () => { sfx.slap(); if (hit) floorIds().filter(f => same(f, d)).forEach(f => FX.bump(floorEl(f))); });
     return S === game ? d : undefined;
   }
 
@@ -614,7 +608,8 @@
   async function animCollect(p, res, before) {
     const jobs = res.taken.map((id, i) => (async () => {
       await sleep(i * T.takeGap);
-      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.take, arc: 14 }, () => sfx.take());
+      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.take, arc: 14 },
+        i === 0 ? () => sfx.slap(true) : null); // 짝이 맞아 가져갈 때 첫 장이 닿으며 '딱' 한 번
     })());
     await Promise.all(jobs);
   }
@@ -622,7 +617,7 @@
   async function animSteal(p, res, before) {
     for (const id of res.stolen) {
       sfx.steal();
-      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.steal, arc: 30 }, () => sfx.take());
+      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.steal, arc: 30 });
       await sleep(60);
     }
   }
@@ -644,7 +639,7 @@
     hidden.add(id);
     if (r.drawn !== null) hidden.add(r.drawn);
     render();
-    await flyCard(id, from, FX.rectOf(pileEl(p, id)), { dur: T.play + 60, flip: p === 1, arc: 20 }, () => sfx.slap(true));
+    await flyCard(id, from, FX.rectOf(pileEl(p, id)), { dur: T.play + 60, flip: p === 1, arc: 20 }, () => sfx.slap());
     if (S !== game) return;
     if (r.drawn !== null) { // 더미에서 한 장 받아 손으로
       const to = p === 0 ? FX.rectOf(handEl(r.drawn)) : oppBackRects(1)[0];
@@ -989,7 +984,7 @@
     save.sound = !save.sound;
     persist();
     updateSoundButtons();
-    sfx.flip();
+    sfx.slap();
   }
 
   function showRules() {
