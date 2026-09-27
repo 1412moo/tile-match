@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>고스톱 패 전체 보기 (개발용)</title>
+<style>
+  body { margin: 0; padding: 10px; background: #1f5e46; font-family: sans-serif; color: #fff; }
+  .row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .row b { width: 44px; font-size: 14px; }
+  .c { width: 64px; height: 102px; border-radius: 6px; background-size: 100% 100%; box-shadow: 0 2px 4px rgba(0,0,0,.4); }
+</style>
+</head>
+<body>
+<div id="sheet"></div>
+<script src="../games/gostop/rules.js"></script>
+<script src="../games/gostop/art.js"></script>
+<script>
+  const sheet = document.getElementById('sheet');
+  for (let m = 0; m <= 12; m++) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<b>${m ? m + '월' : '보너스'}</b>`;
+    GS.CARDS.filter(c => c.month === m).forEach(c => {
+      const d = document.createElement('div');
+      d.className = 'c';
+      d.style.backgroundImage = GSArt.url(c.id);
+      d.title = `${c.id} ${c.kind}`;
+      row.appendChild(d);
+    });
+    if (m === 0) { const b = document.createElement('div'); b.className = 'c'; b.style.backgroundImage = GSArt.back(); row.appendChild(b); }
+    sheet.appendChild(row);
+  }
+</script>
+</body>
+</html>
