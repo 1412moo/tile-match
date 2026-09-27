@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 10;
+  root.APP_VERSION = 11;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -55,9 +55,10 @@
       icon: '🍉',
       desc: '같은 과일을 합쳐 수박 만들기',
       path: 'games/watermelon/',
-      ready: false,
+      ready: true,
       storageKey: 'watermelon.save.v1',
-      files: [],
+      files: ['', 'index.html', 'style.css', 'physics.js', 'core.js', 'art.js', 'game.js'],
+      summary: s => (s.current ? `하던 판 ${(s.current.score | 0).toLocaleString('ko-KR')}점` : s.best ? `최고 ${s.best.toLocaleString('ko-KR')}점` : ''),
     },
   ];
 })(typeof self !== 'undefined' ? self : this);

@@ -400,5 +400,214 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   for (const e of ['jjok', 'ppeok', 'ttadak', 'sseul', 'ppeokTake', 'bomb', 'bonus', 'bonusFlip', 'firstPpeok']) if (!seen[e]) fail(`3000판 동안 '${e}' 가 한 번도 없음`);
 }
 
+// 8) 수박게임: 물리 / 합체 / 점수 / 게임오버 / 저장
+{
+  console.log('[8] 수박게임 물리 / 합체 / 점수 / 위험선 / 저장');
+  require('../games/watermelon/physics.js');
+  require('../games/watermelon/core.js');
+  const P = globalThis.WMPhysics, WM = globalThis.WMCore;
+  const { WW, WH, FRUITS, DT } = WM;
+  const radii = FRUITS.map(f => f.r);
+  const mkRng = s => () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const names = bs => bs.map(b => b.type).sort((a, b) => a - b).join(',');
+
+  // 벽/바닥 뚫림, 숫자 깨짐, 겹침, 튕겨 나감
+  function checkWorld(W, tag) {
+    for (const b of W.bodies) {
+      if (![b.x, b.y, b.px, b.py].every(Number.isFinite)) return fail(`${tag}: 숫자 깨짐`);
+      if (b.x < b.r - 0.01 || b.x > W.w - b.r + 0.01 || b.y > W.h - b.r + 0.01) return fail(`${tag}: 벽/바닥 뚫림 (${b.x.toFixed(1)}, ${b.y.toFixed(1)})`);
+    }
+  }
+  function maxOverlap(W) {
+    let m = 0;
+    const bs = W.bodies;
+    for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++)
+      m = Math.max(m, bs[i].r + bs[j].r - Math.hypot(bs[i].x - bs[j].x, bs[i].y - bs[j].y));
+    return m;
+  }
+
+  // (a) 무작위로 떨어뜨리며 오래 돌리기: 뚫림 없음, 쉬고 나면 겹침·떨림 작음, 합체로 튀어 오르는 높이 제한
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    const rnd = mkRng(seed);
+    const W = P.createWorld({ w: WW, h: WH, radii });
+    const low = new Map();
+    let maxRise = 0;
+    for (let f = 0; f < 60 * 60; f++) {
+      if (f % 30 === 0 && f < 60 * 50) { const t = Math.floor(rnd() * 5); P.addBody(W, t, radii[t] + rnd() * (WW - 2 * radii[t]), WM.HOLD_Y); }
+      P.step(W, DT);
+      checkWorld(W, `물리 seed ${seed}`);
+      for (const b of W.bodies) if (W.time - b.born > 1.2) {
+        const m = Math.max(low.get(b.id) || 0, b.y); low.set(b.id, m);
+        maxRise = Math.max(maxRise, m - b.y);
+      }
+    }
+    for (let f = 0; f < 60 * 5; f++) P.step(W, DT);
+    const ov = maxOverlap(W);
+    let v = 0;
+    for (const b of W.bodies) v = Math.max(v, Math.hypot(b.x - b.px, b.y - b.py) * W.substeps * 60);
+    if (ov > 0.8) fail(`물리 seed ${seed}: 쉰 뒤 겹침 ${ov.toFixed(2)}`);
+    if (v > 15) fail(`물리 seed ${seed}: 쉰 뒤에도 움직임 ${v.toFixed(1)}/초`);
+    if (maxRise > 90) fail(`물리 seed ${seed}: 합체 때 옆 과일이 ${maxRise.toFixed(0)} 만큼 튀어 오름`);
+  }
+
+  // (b) 같은 과일 둘이 닿으면 다음 과일 하나로, 절반 크기에서 커짐
+  for (let t = 0; t < FRUITS.length - 1; t++) {
+    const W = P.createWorld({ w: WW, h: WH, radii });
+    const r = radii[t];
+    P.addBody(W, t, WW / 2 - r, WH - r); P.addBody(W, t, WW / 2 + r + 0.2, WH - r);
+    const ev = [];
+    for (let f = 0; f < 60; f++) ev.push(...P.step(W, DT));
+    if (names(W.bodies) !== String(t + 1) || !ev.some(e => e.kind === 'merge' && e.type === t + 1)) fail(`${FRUITS[t].name} 둘 → ${FRUITS[t + 1].name} 합체 안 됨: ${names(W.bodies)}`);
+    else if (Math.abs(W.bodies[0].r - radii[t + 1]) > 0.01) fail(`${FRUITS[t + 1].name}: 다 자란 크기 ${W.bodies[0].r}`);
+  }
+  // 다른 과일끼리는 합체하지 않음
+  {
+    const W = P.createWorld({ w: WW, h: WH, radii });
+    P.addBody(W, 0, 100, WH - 12); P.addBody(W, 1, 128.5, WH - 16);
+    for (let f = 0; f < 60; f++) P.step(W, DT);
+    if (names(W.bodies) !== '0,1') fail(`다른 과일끼리 합체됨: ${names(W.bodies)}`);
+  }
+  // 수박 둘은 터져서 사라짐 (게임은 계속)
+  {
+    const W = P.createWorld({ w: WW, h: WH, radii });
+    const r = radii[WM.WATERMELON];
+    P.addBody(W, WM.WATERMELON, WW / 2 - r, WH - r); P.addBody(W, WM.WATERMELON, WW / 2 + r, WH - r);
+    const ev = [];
+    for (let f = 0; f < 30; f++) ev.push(...P.step(W, DT));
+    if (W.bodies.length || !ev.some(e => e.kind === 'burst')) fail('수박 두 개가 터지지 않음');
+  }
+  // (c) 연쇄: 귤 하나 폭의 좁은 통에 포도·딸기·체리를 쌓고 체리 → 딸기 → 포도 → 귤
+  {
+    const W = P.createWorld({ w: radii[3] * 2 + 1, h: WH, radii });
+    const cx = W.w / 2;
+    P.addBody(W, 2, cx, WH - 21);
+    P.addBody(W, 1, cx, WH - 42 - 16);
+    P.addBody(W, 0, cx, WH - 42 - 32 - 12);
+    for (let f = 0; f < 30; f++) P.step(W, DT);
+    P.addBody(W, 0, cx, 60);
+    const made = [];
+    for (let f = 0; f < 180; f++) P.step(W, DT).forEach(e => e.kind === 'merge' && made.push(e.type));
+    if (made.join() !== '1,2,3') fail(`연쇄 합체 순서 ${made.join()} (기대 1,2,3)`);
+    checkWorld(W, '연쇄');
+  }
+  // (d) 한 번에 한 과일은 한 번만 합체: 체리 셋이 한꺼번에 닿으면 딸기 하나 + 체리 하나
+  {
+    const W = P.createWorld({ w: WW, h: WH, radii });
+    P.addBody(W, 0, 100, WH - 12); P.addBody(W, 0, 124, WH - 12); P.addBody(W, 0, 112, WH - 12 - 20.8);
+    for (let f = 0; f < 30; f++) P.step(W, DT);
+    if (names(W.bodies) !== '0,1') fail(`체리 셋 동시 합체 결과 ${names(W.bodies)} (기대 0,1)`);
+  }
+  // (e) 빠르게 떨어져도 바닥을 뚫지 않음 (아주 높은 곳에서 떨어뜨리기)
+  {
+    const W = P.createWorld({ w: WW, h: WH, radii });
+    P.addBody(W, 0, 150, -5000, 0, 3000);
+    for (let f = 0; f < 240; f++) { P.step(W, DT); checkWorld(W, '높은 낙하'); }
+  }
+
+  // (f) 점수: 만들어진 과일 점수 합, 수박 터짐 100점
+  {
+    const G = WM.createGame(mkRng(9));
+    const r = radii[4];
+    P.addBody(G.world, 4, 100, WH - r); P.addBody(G.world, 4, 100 + 2 * r + 0.2, WH - r);
+    for (let f = 0; f < 60; f++) WM.update(G);
+    if (G.score !== FRUITS[5].score || FRUITS[5].score !== 15) fail(`감 두 개 → 사과 점수 ${G.score}`);
+    const G2 = WM.createGame(mkRng(9));
+    const rw = radii[WM.WATERMELON];
+    P.addBody(G2.world, 9, WW / 2 - radii[9], WH - radii[9]); P.addBody(G2.world, 9, WW / 2 + radii[9] + 0.2, WH - radii[9]);
+    let madeW = false;
+    for (let f = 0; f < 90; f++) WM.update(G2).forEach(e => { if (e.kind === 'watermelon') madeW = true; });
+    if (!madeW || G2.watermelons !== 1 || G2.over) fail('멜론 둘 → 수박 이후 게임이 계속되지 않음');
+    if (!WM.drop(G2, 150)) fail('수박을 만든 뒤 과일을 떨어뜨릴 수 없음');
+    const G3 = WM.createGame(mkRng(9));
+    P.addBody(G3.world, 10, WW / 2 - rw, WH - rw); P.addBody(G3.world, 10, WW / 2 + rw, WH - rw);
+    for (let f = 0; f < 30; f++) WM.update(G3);
+    if (G3.score !== WM.BURST_SCORE || G3.over) fail(`수박 둘 터짐 점수 ${G3.score}`);
+  }
+  // (g) 떨어뜨리기: 대기 시간, 다음 과일, 작은 5종만
+  {
+    const G = WM.createGame(mkRng(3));
+    const next = G.next;
+    if (!WM.drop(G, 150)) fail('첫 과일을 떨어뜨릴 수 없음');
+    if (WM.drop(G, 150)) fail('대기 시간 중에도 떨어짐');
+    if (G.held !== next) fail('다음 과일이 들고 있는 과일로 오지 않음');
+    for (let f = 0; f < 31; f++) WM.update(G);
+    if (!WM.canDrop(G)) fail('0.5초 뒤에도 떨어뜨릴 수 없음');
+    WM.drop(G, -100);
+    const b = G.world.bodies[G.world.bodies.length - 1];
+    if (b.x < b.r) fail('벽 밖을 겨눠도 상자 안으로 떨어져야 함');
+    const seen = new Set();
+    const rng = mkRng(77);
+    for (let i = 0; i < 2000; i++) seen.add(WM.randDrop(rng));
+    if ([...seen].sort().join() !== '0,1,2,3,4') fail(`떨어뜨리는 과일 종류 ${[...seen].sort().join()}`);
+  }
+  // (h) 위험선: 막 떨어진 과일은 무시, 3초 넘게 머물러야 게임 끝, 내려가면 초기화
+  {
+    // 떨어지는 중인 과일은 위험선 위를 지나가도 괜찮음
+    const G = WM.createGame(mkRng(5));
+    for (let i = 0; i < 6; i++) { G.cool = 0; WM.drop(G, 40 + i * 45); for (let f = 0; f < 20; f++) WM.update(G); }
+    for (let f = 0; f < 240; f++) WM.update(G);
+    if (G.over || G.dangerT > 0) fail('과일 몇 개 떨어뜨렸을 뿐인데 위험 판정');
+    // 상자를 넘치게 채우면: 위험 시작 후 3초 지나서 끝남 (그 전에는 안 끝남)
+    const H = WM.createGame(mkRng(6));
+    const rnd = mkRng(8);
+    for (let i = 0; i < 45; i++) P.addBody(H.world, 5 + (i % 5), 40 + rnd() * 220, WH - 40 - i * 60);
+    let dangerAt = -1, overAt = -1;
+    for (let f = 0; f < 60 * 40 && !H.over; f++) {
+      const ev = WM.update(H);
+      if (ev.some(e => e.kind === 'danger')) dangerAt = f;
+      if (ev.some(e => e.kind === 'safe')) dangerAt = -1;
+      if (ev.some(e => e.kind === 'over')) overAt = f;
+    }
+    if (!H.over) fail('넘치게 채워도 게임이 끝나지 않음');
+    else if (dangerAt < 0 || Math.abs((overAt - dangerAt + 1) * DT - WM.DANGER_TIME) > 0.05) fail(`위험 시작 ${dangerAt} → 끝 ${overAt}: 3초 유예가 아님`);
+    if (WM.drop(H, 150)) fail('게임이 끝났는데 떨어뜨려짐');
+    // 위험선 위 과일을 치우면 시간 초기화
+    const K = WM.createGame(mkRng(6));
+    const nb = P.addBody(K.world, 9, 150, WM.DANGER_Y - 10);
+    nb.born = -10;
+    K.world.gravity = 0;
+    for (let f = 0; f < 60; f++) WM.update(K);
+    if (!(K.dangerT > 0.9)) fail(`위험선 위 1초: dangerT ${K.dangerT}`);
+    K.world.bodies.length = 0;
+    const ev = WM.update(K);
+    if (K.dangerT !== 0 || !ev.some(e => e.kind === 'safe')) fail('위험선 위 과일이 없어졌는데 시간이 남음');
+  }
+  // (i) 저장/불러오기: JSON 으로 저장 → 다시 만들면 같은 판, 이어서 진행 가능
+  {
+    const G = WM.createGame(mkRng(12));
+    const rnd = mkRng(13);
+    for (let i = 0; i < 40; i++) { G.cool = 0; WM.drop(G, rnd() * WW); for (let f = 0; f < 25; f++) WM.update(G); }
+    const saved = JSON.parse(JSON.stringify(WM.serialize(G)));
+    const R = WM.createGame(mkRng(1), saved);
+    if (R.score !== G.score || R.held !== G.held || R.next !== G.next || R.world.bodies.length !== G.world.bodies.length) fail('불러온 판이 저장한 판과 다름');
+    const d = Math.max(0, ...R.world.bodies.map((b, i) => Math.hypot(b.x - G.world.bodies[i].x, b.y - G.world.bodies[i].y)));
+    if (d > 0.01) fail(`불러온 과일 위치 차이 ${d}`);
+    for (let f = 0; f < 120; f++) WM.update(R);
+    checkWorld(R.world, '불러온 판');
+    if (R.over) fail('불러온 판이 바로 끝남');
+    // 망가진 저장 데이터도 안전하게
+    const bad = WM.createGame(mkRng(1), { bodies: [[99, NaN, 5], [3, 1e9, -50, 0, 0, 0], 'x'.split('')], held: 50, next: -3, score: 'a' });
+    for (let f = 0; f < 60; f++) WM.update(bad);
+    checkWorld(bad.world, '망가진 저장');
+    if (bad.held < 0 || bad.held > 4 || bad.next < 0 || bad.next > 4) fail('망가진 저장: 들고 있는 과일 범위');
+  }
+  // (j) 끝까지 자동 플레이: 판이 끝나고, 성능 확인
+  {
+    const t0 = Date.now();
+    let frames = 0;
+    for (const seed of [21, 22, 23]) {
+      const rnd = mkRng(seed);
+      const G = WM.createGame(rnd);
+      let f = 0;
+      while (!G.over && f < 60 * 60 * 15) { if (f % 40 === 0) WM.drop(G, rnd() * WW); WM.update(G); checkWorld(G.world, `자동 플레이 ${seed}`); f++; }
+      frames += f;
+      if (!G.over) fail(`자동 플레이 ${seed}: 15분 안에 끝나지 않음`);
+    }
+    const ms = (Date.now() - t0) / frames;
+    console.log(`  자동 플레이 3판, 평균 ${ms.toFixed(3)}ms/프레임`);
+    if (ms > 2) fail(`물리 계산이 느림: ${ms.toFixed(2)}ms/프레임`);
+  }
+}
+
 console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
 process.exit(failures ? 1 : 0);
