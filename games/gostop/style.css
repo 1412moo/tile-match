@@ -218,3 +218,14 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 
 .credit { margin: 0; font-size: 12px; opacity: .6; max-width: 300px; line-height: 1.4; }
 .credit a { color: inherit; }
+
+/* ---------- 카드 이동 연출 (fx.js) ---------- */
+#fx { position: fixed; inset: 0; pointer-events: none; z-index: 7000; }
+.fx-card { position: absolute; transform-style: preserve-3d; will-change: transform; }
+.fx-card .face {
+  position: absolute; inset: 0; border-radius: var(--r, 4px); background-size: 100% 100%; background-repeat: no-repeat;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .5), 0 8px 16px rgba(0, 0, 0, .35);
+}
+.fx-card .back { transform: rotateY(180deg); }
+.hw.ghost { visibility: hidden; }

@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 11;
+  root.APP_VERSION = 12;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -28,7 +28,7 @@
       path: 'games/gostop/',
       ready: true,
       storageKey: 'gostop.save.v1',
-      files: ['', 'index.html', 'style.css', 'rules.js', 'art.js', 'game.js'].concat(
+      files: ['', 'index.html', 'style.css', 'rules.js', 'art.js', 'fx.js', 'game.js'].concat(
         // 화투패 그림 48장 (Wikimedia Commons Hwatu SVG, CC BY-SA 4.0 - cards/ATTRIBUTION.md)
         ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
           .flatMap((m, i) => (i === 10 ? ['Hikari', 'Kasu_1', 'Kasu_2', 'Kasu_3'] : i === 11 ? ['Hikari', 'Tane', 'Tanzaku', 'Kasu']

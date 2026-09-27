@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 10; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 12; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -77,24 +77,49 @@
       o.start(t0);
       o.stop(t0 + dur + 0.02);
     }
-    // 패를 '탁' 내려치는 소리: 짧은 잡음
-    function slap() {
+    // 잡음 한 번: 카드가 부딪히고 스치는 소리의 재료
+    // o = { at, dur, freq, freqTo, q, vol, type, curve(감쇠 세기) }
+    let noiseBuf = null;
+    function noise(o) {
       if (!save.sound) return;
       const c = ensure();
       if (!c) return;
-      const len = Math.floor(c.sampleRate * 0.06), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3;
-      const src = c.createBufferSource(), g = c.createGain();
-      g.gain.value = 0.55;
-      src.buffer = buf;
-      src.connect(g).connect(c.destination);
-      src.start();
-      tone(150, 0, 0.08, 'sine', 0.25);
+      if (!noiseBuf) {
+        const len = c.sampleRate; // 1초짜리 흰 잡음을 만들어 두고 잘라 씀
+        noiseBuf = c.createBuffer(1, len, c.sampleRate);
+        const d = noiseBuf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      }
+      const t0 = c.currentTime + (o.at || 0), dur = o.dur;
+      const src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+      src.buffer = noiseBuf;
+      f.type = o.type || 'bandpass';
+      f.frequency.setValueAtTime(o.freq, t0);
+      if (o.freqTo) f.frequency.exponentialRampToValueAtTime(o.freqTo, t0 + dur);
+      f.Q.value = o.q || 1;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(o.vol, t0 + (o.attack || 0.002));
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      src.connect(f).connect(g).connect(c.destination);
+      src.start(t0, Math.random() * 0.5);
+      src.stop(t0 + dur + 0.02);
+    }
+    // '탁': 패를 바닥에 내리치는 소리 (짝패 위에 칠 때는 더 세고 높게 '딱!')
+    function slap(hard) {
+      noise({ dur: hard ? 0.07 : 0.06, freq: hard ? 2600 : 1900, q: 0.9, vol: hard ? 1 : 0.75 });
+      noise({ dur: 0.012, freq: 5200, q: 0.7, vol: hard ? 0.55 : 0.3, type: 'highpass' }); // 앞의 딱딱한 부딪힘
+      tone(hard ? 190 : 160, 0, 0.07, 'sine', hard ? 0.4 : 0.3, 70);                      // 바닥 울림
     }
     return {
       unlock: ensure, slap,
-      flip: () => tone(520, 0, 0.1, 'triangle', 0.15, 780),
-      take: () => [620, 820].forEach((f, i) => tone(f, i * 0.07, 0.14, 'triangle', 0.2)),
+      // '촥': 더미에서 패를 뒤집는 소리
+      flip: () => noise({ dur: 0.1, freq: 900, freqTo: 3800, q: 1.3, vol: 0.4, attack: 0.02 }),
+      // '착': 먹은 패가 내 더미에 쌓이는 소리
+      take: () => { noise({ dur: 0.04, freq: 3200, q: 1.6, vol: 0.45 }); tone(700, 0, 0.04, 'sine', 0.06); },
+      // '쓱-': 상대 피를 끌어오는 소리 + 짧은 '띵'
+      steal: () => { noise({ dur: 0.22, freq: 3400, freqTo: 900, q: 1.1, vol: 0.35, attack: 0.03 }); tone(1320, 0.17, 0.14, 'triangle', 0.13); },
+      // '슥': 더미에서 한 장 받아 손으로
+      draw: () => noise({ dur: 0.09, freq: 1600, freqTo: 2600, q: 1, vol: 0.25, attack: 0.015 }),
       event: () => [660, 880, 1100].forEach((f, i) => tone(f, i * 0.07, 0.18, 'square', 0.08)),
       go: () => [523, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.2, 'triangle', 0.22)),
       win: () => [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, i * 0.11, 0.22, 'triangle', 0.22)),
@@ -116,6 +141,7 @@
     el.style.backgroundImage = ART.url(id);
     if (w) el.style.setProperty('--w', w + 'px');
     el.dataset.id = id;
+    if (hidden.has(id)) el.classList.add('ghost'); // 날아오는 중: 도착하면 보임
     el.setAttribute('role', 'img');
     el.setAttribute('aria-label', cardName(id));
     return el;
@@ -137,8 +163,14 @@
   let S = null;
   let busy = false;
   let pickOptions = null, pickResolve = null, selected = null;
-  let fresh = new Set();
   let slotOf = {}; // 바닥: 달 → 자리 번호 (한 번 놓인 자리는 그 달이 없어질 때까지 유지)
+  // 연출 중 잠깐 보여 주는 화면 상태 (규칙 상태 S 는 그대로)
+  //   floorAdd: 뒤집어서 바닥에 내려놓은 것처럼 보일 패, deckHide: 더미에서 이미 꺼낸 장수,
+  //   capAdd: 먼저 먹은 것처럼 보일 패 (더미 위 보너스패)
+  const view = { floorAdd: [], deckHide: 0, capAdd: [[], []] };
+  const hidden = new Set(); // 날아오는 중이라 아직 숨겨 둔 카드
+  const resetView = () => { view.floorAdd = []; view.deckHide = 0; view.capAdd = [[], []]; };
+  const floorIds = () => S.floor.concat(view.floorAdd);
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const setMsg = t => { $('#msg').textContent = t || ''; };
@@ -245,7 +277,7 @@
     const W = table.clientWidth, H = table.clientHeight;
     floor.innerHTML = '';
     const byMonth = {};
-    S.floor.forEach(id => { (byMonth[C[id].month] = byMonth[C[id].month] || []).push(id); });
+    floorIds().forEach(id => { (byMonth[C[id].month] = byMonth[C[id].month] || []).push(id); });
     for (const m of Object.keys(slotOf)) if (!byMonth[m]) delete slotOf[m];
     const months = Object.keys(byMonth).map(Number).sort((a, b) => a - b);
     const need = Math.max(months.length, 8);
@@ -292,7 +324,6 @@
         el.style.top = (cy - h / 2).toFixed(1) + 'px';
         el.style.zIndex = picking ? 20 + i : 2 + i;
         if (pickOptions && pickOptions.includes(id)) el.classList.add('pick');
-        if (fresh.has(id)) el.classList.add('fresh');
         el.addEventListener('click', () => onFloorTap(id));
         floor.appendChild(el);
       });
@@ -316,8 +347,9 @@
     const oc = document.createElement('span');
     oc.textContent = `${S.hands[1].length}장` + (S.dummies[1] ? ` +폭탄패 ${S.dummies[1]}` : '');
     ob.appendChild(oc);
-    $('#deck-count').textContent = `${S.deck.length}장`;
-    $('#deck').style.visibility = S.deck.length ? 'visible' : 'hidden';
+    const deckN = S.deck.length - view.deckHide;
+    $('#deck-count').textContent = `${deckN}장`;
+    $('#deck').style.visibility = deckN > 0 ? 'visible' : 'hidden';
     $('#opp-badges').innerHTML = badgesHTML(1);
     $('#my-badges').innerHTML = badgesHTML(0);
     $('#opp-pts').textContent = `${R.bestScore(S.captured[1]).total}점`;
@@ -328,11 +360,10 @@
     mult.classList.toggle('hidden', (S.mult || 1) <= 1);
     mult.textContent = `판 ×${S.mult}`;
 
-    renderPiles($('#opp-piles'), S.captured[1]);
-    renderPiles($('#my-piles'), S.captured[0]);
+    renderPiles($('#opp-piles'), S.captured[1].concat(view.capAdd[1]));
+    renderPiles($('#my-piles'), S.captured[0].concat(view.capAdd[0]));
     renderHand();
     layoutFloor(); // 손패 높이가 정해진 뒤에 바닥 크기를 잰다
-    fresh = new Set();
   }
 
   function renderHand() {
@@ -373,15 +404,6 @@
     hand.style.setProperty('--hand-w', w + 'px');
   }
 
-  function showFlip(id, label) {
-    const box = $('#flip-show');
-    box.innerHTML = '';
-    box.appendChild(cardEl(id));
-    const s = document.createElement('span');
-    s.textContent = label;
-    box.appendChild(s);
-    box.classList.remove('hidden');
-  }
   const hideFlip = () => $('#flip-show').classList.add('hidden');
 
   async function flash(text, small, ms) {
@@ -397,6 +419,7 @@
     el.style.animation = 'none';
     void el.offsetWidth;
     el.style.animation = '';
+    el.style.animationDuration = (ms || 1000) + 'ms'; // 보이는 시간만큼 튀어나왔다 사라짐
     await sleep(ms || 1000);
     el.classList.add('hidden');
   }
@@ -507,14 +530,132 @@
     if (pickResolve && pickOptions && pickOptions.includes(id)) endPick(id);
   }
 
-  // 보너스패: 먹고, 상대 피 1장, 더미에서 한 장 받아 같은 차례 계속
+  // ---------------- 카드 이동 연출 (신맞고처럼 짧고 경쾌하게) ----------------
+  // 속도(ms): 패 내기 180 · 뒤집기 330 · 먹기 한 장 210(간격 65) · 피 뺏기 280
+  const T = { play: 180, bombGap: 95, flip: 330, take: 210, takeGap: 65, steal: 280, after: 110 };
+  const FX = window.GSFx;
+  const floorEl = id => document.querySelector(`#floor .hw[data-id="${id}"]`);
+  const pileEl = (p, id) => document.querySelector(`${p === 0 ? '#my-piles' : '#opp-piles'} .hw[data-id="${id}"]`);
+  const handEl = id => document.querySelector(`#hand .hw[data-id="${id}"]`);
+  const deckRect = () => FX.rectOf($('#deck .hw'));
+  // 상대 손패(뒷면) 중 뒤에서 n 장의 위치
+  function oppBackRects(n) {
+    const backs = [...document.querySelectorAll('#opp-hand .hw.back')];
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(FX.rectOf(backs[Math.max(0, backs.length - 1 - i)]) || deckRect());
+    return out;
+  }
+  // 먹은 패 더미의 끝 (아직 그려지지 않은 패가 날아갈 곳)
+  function pileRect(p) {
+    const box = $(p === 0 ? '#my-piles' : '#opp-piles');
+    const cards = box.querySelectorAll('.g-pi .hw');
+    return FX.rectOf(cards[cards.length - 1]) || FX.rectOf(box);
+  }
+  // 숨겨 둔 진짜 카드를 보이게 하고 착지 느낌
+  function reveal(id, strong) {
+    hidden.delete(id);
+    document.querySelectorAll(`.hw[data-id="${id}"].ghost`).forEach(el => { el.classList.remove('ghost'); FX.land(el, strong); });
+  }
+  // 한 장 날리기 → 도착하면 진짜 카드를 보이고 소리
+  async function flyCard(id, from, to, opt, onLand) {
+    const el = await FX.fly(Object.assign({ front: ART.url(id), back: ART.back(), from, to }, opt));
+    reveal(id, opt && opt.strong);
+    FX.remove(el);
+    if (onLand) onLand();
+  }
+  const same = (a, b) => a !== b && C[a].month && C[a].month === C[b].month;
+
+  // 1) 손에서 바닥으로 패 내기. ids: 이번에 낸 패 (폭탄이면 3장), from: 출발 위치들
+  async function animPlay(p, ids, from, hadMatch) {
+    const jobs = ids.map((id, i) => (async () => {
+      await sleep(i * T.bombGap); // 폭탄은 '타-타-탁' 한 장씩
+      const to = FX.rectOf(floorEl(id));
+      await flyCard(id, from[i], to, { dur: T.play, flip: p === 1, strong: hadMatch },
+        () => {
+          sfx.slap(hadMatch);
+          if (hadMatch) floorIds().filter(f => same(f, id) && !ids.includes(f)).forEach(f => FX.bump(floorEl(f)));
+        });
+    })());
+    await Promise.all(jobs);
+  }
+
+  // 2) 더미에서 뒤집기: 더미 위 보너스패는 먹는 쪽으로, 그다음 패는 바닥 자리로
+  //    돌려주는 값: 뒤집은 패 id, 더미가 비었으면 null, 판이 바뀌었으면 undefined
+  async function animFlip(p, game) {
+    const bonusTop = R.peekBonus(S);
+    const d = R.peek(S);
+    for (const b of bonusTop) {
+      const from = deckRect();
+      view.deckHide++;
+      view.capAdd[p].push(b);
+      hidden.add(b);
+      render();
+      sfx.flip();
+      await flyCard(b, from, FX.rectOf(pileEl(p, b)) || pileRect(p), { dur: T.flip + 60, flip: true, pop: 0.4 }, () => sfx.take());
+      if (S !== game) return undefined;
+      await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', '한 장 더 뒤집어요', 650);
+      if (S !== game) return undefined;
+    }
+    if (d === null) return null;
+    const from = deckRect();
+    const hit = floorIds().some(f => same(f, d));
+    view.deckHide++;
+    view.floorAdd = [d];
+    hidden.add(d);
+    render();
+    sfx.flip();
+    await flyCard(d, from, FX.rectOf(floorEl(d)), { dur: T.flip, flip: true, pop: 0.42, strong: hit },
+      () => { sfx.slap(hit); if (hit) floorIds().filter(f => same(f, d)).forEach(f => FX.bump(floorEl(f))); });
+    return S === game ? d : undefined;
+  }
+
+  // 3) 먹기: 짝끼리 차례로 먹은 패 더미로
+  // before: 규칙을 적용하기 전(지금 화면)의 카드 위치들
+  async function animCollect(p, res, before) {
+    const jobs = res.taken.map((id, i) => (async () => {
+      await sleep(i * T.takeGap);
+      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.take, arc: 14 }, () => sfx.take());
+    })());
+    await Promise.all(jobs);
+  }
+  // 4) 상대 피 뺏기: 상대 더미에서 한 장씩 끌어옴
+  async function animSteal(p, res, before) {
+    for (const id of res.stolen) {
+      sfx.steal();
+      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.steal, arc: 30 }, () => sfx.take());
+      await sleep(60);
+    }
+  }
+  // 지금 화면에 보이는 카드들의 위치 (바닥 + 양쪽 먹은 패)
+  function snapshotRects() {
+    const out = {};
+    document.querySelectorAll('#floor .hw[data-id], #my-piles .hw[data-id], #opp-piles .hw[data-id]').forEach(el => {
+      const r = FX.rectOf(el);
+      if (r) out[el.dataset.id] = r;
+    });
+    return out;
+  }
+
+  // 보너스패: 손에서 내면 먹고, 더미에서 한 장 받아 같은 차례 계속
   async function doBonus(id) {
     const game = S, p = S.turn;
+    const from = p === 0 ? FX.rectOf(handEl(id)) : oppBackRects(1)[0];
     const r = R.play(S, id);
-    sfx.slap();
+    hidden.add(id);
+    if (r.drawn !== null) hidden.add(r.drawn);
     render();
+    await flyCard(id, from, FX.rectOf(pileEl(p, id)), { dur: T.play + 60, flip: p === 1, arc: 20 }, () => sfx.slap(true));
+    if (S !== game) return;
+    if (r.drawn !== null) { // 더미에서 한 장 받아 손으로
+      const to = p === 0 ? FX.rectOf(handEl(r.drawn)) : oppBackRects(1)[0];
+      sfx.draw();
+      const el = await FX.fly({ front: p === 0 ? ART.url(r.drawn) : ART.back(), back: ART.back(), from: deckRect(), to, dur: 240, flip: p === 0 });
+      reveal(r.drawn);
+      FX.remove(el);
+    }
+    if (S !== game) return;
     sfx.event();
-    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요') : '한 장 더');
+    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요') : '한 장 더', 700);
     if (S !== game) return;
     saveGame();
     if (p === 1) { aiTurn(); return; }
@@ -529,75 +670,81 @@
     if (opt.dummy) {
       R.playDummy(S);
       setMsg(p === 0 ? '폭탄패: 뒤집기만 해요' : '컴퓨터 폭탄패: 뒤집기만');
+      render();
     } else {
+      // 낼 패들의 출발 위치 (내 손패 / 상대 손패 뒷면)
+      const bombCards = opt.bomb && R.canBomb(S, id) ? S.hands[p].filter(x => C[x].month === C[id].month) : [id];
+      const from = p === 0 ? bombCards.map(x => FX.rectOf(handEl(x))) : oppBackRects(bombCards.length);
+      const hadMatch = S.floor.some(f => same(f, id));
       const res = R.play(S, id, opt);
-      if (res.bomb) S.pending.cards.forEach(c => fresh.add(c));
-      else fresh.add(id);
+      const ids = res.bomb ? S.pending.cards.slice() : [id];
       if (opt.shake && S.shake[p] && !res.bomb) {
         render();
-        await flash(p === 0 ? '흔들기!' : '컴퓨터 흔들기!', '이기면 점수 2배');
+        await flash(p === 0 ? '흔들기!' : '컴퓨터 흔들기!', '이기면 점수 2배', 800);
+        if (S !== game) return;
       }
       setMsg(p === 0 ? '' : '컴퓨터가 패를 냈어요');
+      ids.forEach(x => hidden.add(x));
+      render();
+      await animPlay(p, ids, from, hadMatch);
+      if (S !== game) return;
+      await sleep(70);
     }
-    sfx.slap();
-    render();
-    await sleep(500);
-    if (S !== game) return;
 
     // 더미에서 뒤집기 (위에 보너스패가 있으면 먼저 나옴)
-    const bonusTop = R.peekBonus(S);
-    const d = R.peek(S);
-    if (bonusTop.length) {
-      showFlip(bonusTop[0], '보너스 패! 한 장 더');
-      sfx.flip();
-      await sleep(750);
-    }
+    const d = await animFlip(p, game);
+    if (S !== game || d === undefined) return;
     let fc = null;
     if (d !== null) {
-      showFlip(d, p === 0 ? '뒤집은 패' : '컴퓨터가 뒤집은 패');
-      sfx.flip();
-      await sleep(750);
-      if (S !== game) return;
       const fo = R.flipOptions(S);
       if (fo) {
         if (p === 0) fc = await pickFloor(fo, '뒤집은 패로 가져올 패를 골라 주세요');
-        else fc = R.bestCard(fo);
+        else { await sleep(250); fc = R.bestCard(fo); }
+        if (S !== game) return;
       }
     }
-    hideFlip();
+    await sleep(90);
+    if (S !== game) return;
+
+    // 규칙 적용 → (쪽·뻑·따닥 등 알림) → 먹기 → 피 뺏기
+    const before = snapshotRects();
     const res = R.flip(S, fc);
-    if (d !== null && S.floor.includes(d)) fresh.add(d);
-    render();
     await showEvents(res);
     if (S !== game) return;
+    resetView();
+    res.taken.concat(res.stolen).forEach(x => hidden.add(x));
+    render();
+    await animCollect(p, res, before);
+    if (S !== game) return;
+    if (res.stolen.length) {
+      await sleep(80);
+      await animSteal(p, res, before);
+      if (S !== game) return;
+    }
+    hidden.clear();
     R.endTurn(S);
     saveGame();
     render();
-    await sleep(250);
+    await sleep(T.after);
     if (S === game) proceed();
   }
 
   const EVENT_TEXT = {
     jjok: ['쪽!'], ppeok: ['뻑!'], ttadak: ['따닥!'], sseul: ['싹쓸이!'], ppeokTake: ['뻑 먹기!'], jappeok: ['자뻑!'],
-    bomb: ['폭탄!'], bonusFlip: ['보너스 패!'], firstPpeok: ['첫뻑!', '+7점'], yeonPpeok: ['연뻑!', '+14점'],
+    bomb: ['폭탄!'], firstPpeok: ['첫뻑!', '+7점'], yeonPpeok: ['연뻑!', '+14점'],
     samyeonPpeok: ['삼연뻑!', '바로 이겨요'], firstTtadak: ['첫따닥!', '+7점'],
   };
+  // 쪽·뻑·따닥 등: 패가 바닥에 놓인 채로 알림 (먹는 연출은 그다음)
   async function showEvents(res) {
     const mine = res.player === 0;
     const stolenMsg = res.stolen.length ? (mine ? `상대 피 ${res.stolen.length}장 가져옴` : `피 ${res.stolen.length}장 뺏겼어요`) : '';
     const evs = res.events.filter(e => EVENT_TEXT[e]);
-    if (evs.length) {
-      sfx.event();
-      for (let i = 0; i < evs.length; i++) {
-        const [t, sub] = EVENT_TEXT[evs[i]];
-        const last = i === evs.length - 1;
-        await flash((mine ? '' : '컴퓨터 ') + t, [sub, last ? stolenMsg : ''].filter(Boolean).join(' · '));
-      }
-    } else if (res.taken.length) {
-      sfx.take();
-      await sleep(350);
-    } else {
-      await sleep(250);
+    if (!evs.length) return;
+    sfx.event();
+    for (let i = 0; i < evs.length; i++) {
+      const [t, sub] = EVENT_TEXT[evs[i]];
+      const last = i === evs.length - 1;
+      await flash((mine ? '' : '컴퓨터 ') + t, [sub, last ? stolenMsg : ''].filter(Boolean).join(' · '), 750);
     }
   }
 
@@ -610,14 +757,14 @@
     const game = S;
     setMsg('컴퓨터 차례예요…');
     render();
-    await sleep(800);
+    await sleep(450);
     if (S !== game) return;
     const a = R.aiPick(S);
     if (a.dummy) return doPlay(null, { dummy: true });
     if (R.isBonus(a.card)) return doBonus(a.card);
     if (a.bomb) {
       showModalCards('💣 컴퓨터 폭탄!', S.hands[1].filter(x => C[x].month === C[a.card].month));
-      await sleep(1400);
+      await sleep(900);
       hideModal();
       if (S !== game) return;
     }
@@ -639,7 +786,7 @@
         buttons: [{ label: '고!', value: true }, { label: '스톱', cls: 'stop', value: false }],
       });
     } else {
-      await sleep(600);
+      await sleep(400);
       go = R.aiGoStop(S);
     }
     if (S !== game) return;
@@ -773,6 +920,9 @@
     busy = false;
     selected = null;
     hideFlip();
+    FX.clear();
+    hidden.clear();
+    resetView();
     $('#event').classList.add('hidden');
   }
   function goHome() {
