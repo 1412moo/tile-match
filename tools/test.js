@@ -81,6 +81,16 @@ console.log('[0] 문법 / 버전 일치 / 게임 목록 파일 검사');
     const tags = read(h).match(/\?v=\d+/g) || [];
     if (!tags.length || tags.some(t => t !== `?v=${swV}`)) fail(`${h} 버전 태그 불일치: ${tags.join(',')} (sw.js VERSION=${swV})`);
   }
+  // 홈 화면에 설치되는 앱 이름은 모든 곳에서 '엄마 게임천국'
+  const APP_NAME = '엄마 게임천국';
+  const mf = JSON.parse(read('manifest.webmanifest'));
+  if (mf.name !== APP_NAME || mf.short_name !== APP_NAME) fail(`manifest 앱 이름: ${mf.name} / ${mf.short_name}`);
+  for (const h of htmls) {
+    const html = read(h);
+    for (const meta of ['application-name', 'apple-mobile-web-app-title']) {
+      if (!html.includes(`<meta name="${meta}" content="${APP_NAME}">`)) fail(`${h}: ${meta} 가 '${APP_NAME}' 이 아님`);
+    }
+  }
   for (const f of ['manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'hub.css']) {
     if (!fs.existsSync(path.join(ROOT, f))) fail(`파일 없음: ${f}`);
   }
