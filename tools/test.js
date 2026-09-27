@@ -280,16 +280,32 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   GS.play(s, m6[0], { choice: m6[2] }); GS.flip(s);
   if (!s.captured[0].includes(m6[2]) || !s.floor.includes(m6[1])) fail('고른 패를 가져가지 않음');
 
-  // 보너스패: 손에서 내면 먹고, 더미에서 1장 가져오고, 같은 차례 계속 (표준 맞고: 상대 피는 안 뺏음)
+  // 보너스패: 손에서 내면 먹고, 상대 피 1장 가져오고, 더미에서 1장 받고, 같은 차례 계속 (한게임 신맞고)
   s = gsBase(); s.hands[0] = [BONUS[0], keep]; s.hands[1] = [keep2]; s.deck = [filler, gsOf(8, 'pi')[0]]; s.captured[1] = opPi();
   r = GS.play(s, BONUS[0]);
-  if (!r.bonus || r.stolen.length !== 0 || s.captured[1].length !== 2 || !s.hands[0].includes(gsOf(8, 'pi')[0]) || s.turn !== 0 || s.pending) fail('보너스패 손에서 사용');
+  if (!r.bonus || r.stolen.length !== 1 || s.captured[1].length !== 1 || !s.captured[0].includes(r.stolen[0]) || !s.captured[0].includes(BONUS[0]) ||
+    !s.hands[0].includes(gsOf(8, 'pi')[0]) || s.turn !== 0 || s.pending) fail('보너스패 손에서 사용: 먹기·피 1장·한 장 받기·같은 차례');
+  // 상대에게 피가 없으면 아무것도 안 가져옴 (광·띠만 있음)
+  s = gsBase(); s.hands[0] = [BONUS[1], keep]; s.hands[1] = [keep2]; s.deck = [filler, gsOf(8, 'pi')[0]]; s.captured[1] = [gsOf(1, 'gwang')[0], gsOf(2, 'tti')[0]];
+  r = GS.play(s, BONUS[1]);
+  if (r.stolen.length !== 0 || s.captured[1].length !== 2) fail('상대 피가 없는데 보너스패로 뭔가 가져감');
+  // 일반 피가 있으면 쌍피보다 일반 피를 먼저
+  s = gsBase(); s.hands[0] = [BONUS[0], keep]; s.hands[1] = [keep2]; s.deck = [filler, gsOf(8, 'pi')[0]];
+  const ssang = gsOf(11, 'pi').find(id => GC[id].pi === 2); s.captured[1] = [ssang, opPi()[0]];
+  r = GS.play(s, BONUS[0]);
+  if (r.stolen.join() !== String(opPi()[0])) fail('보너스패: 일반 피보다 쌍피를 먼저 가져감');
+  // 컴퓨터가 낸 보너스패도 똑같이 (내 피 1장)
+  s = gsBase(); s.turn = 1; s.hands[1] = [BONUS[0], keep2]; s.hands[0] = [keep]; s.deck = [filler, gsOf(8, 'pi')[0]]; s.captured[0] = opPi();
+  r = GS.play(s, BONUS[0]);
+  if (r.stolen.length !== 1 || s.captured[0].length !== 1 || !s.captured[1].includes(r.stolen[0]) || s.turn !== 1) fail('컴퓨터 보너스패: 내 피 1장');
   // 보너스패: 더미에서 나오면 먹고 한 장 더 뒤집음
   s = gsBase(); s.hands[0] = [gsOf(3)[0], keep]; s.hands[1] = [keep2]; s.floor = [gsOf(3)[1]];
   s.deck = [filler, gsOf(5, 'pi')[0], BONUS[1]];
   if (GS.peek(s) !== gsOf(5, 'pi')[0]) fail('보너스패 아래 패 미리보기');
+  s.captured[1] = opPi();
   GS.play(s, gsOf(3)[0]); r = GS.flip(s);
   if (!r.events.includes('bonusFlip') || !s.captured[0].includes(BONUS[1]) || r.flipped !== gsOf(5, 'pi')[0]) fail('보너스패 뒤집기');
+  if (r.stolen.length !== 1 || s.captured[1].length !== 1) fail(`뒤집어서 먹은 보너스패: 상대 피 1장 (${r.stolen.length})`);
 
   // 흔들기: 같은 달 3장 → ×2, 같은 달은 다시 묻지 않음
   s = gsBase(); const m10 = gsOf(10); s.hands[0] = [m10[0], m10[1], m10[2], keep]; s.hands[1] = [keep2]; s.floor = [gsOf(1)[0]];

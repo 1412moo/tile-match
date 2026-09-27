@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 14; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 15; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -114,6 +114,8 @@
       unlock: ensure, slap,
       // '쓱-': 상대 피를 끌어오는 소리 + 짧은 '띵'
       steal: () => { noise({ dur: 0.22, freq: 3400, freqTo: 900, q: 1.1, vol: 0.35, attack: 0.03 }); tone(1320, 0.17, 0.14, 'triangle', 0.13); },
+      // 패 돌리기: 아주 작고 짧은 '틱'
+      deal: () => noise({ dur: 0.025, freq: 2600 + Math.random() * 600, q: 1.4, vol: 0.14 }),
       // '슥': 더미에서 한 장 받아 손으로
       draw: () => noise({ dur: 0.09, freq: 1600, freqTo: 2600, q: 1, vol: 0.25, attack: 0.015 }),
       go: () => [523, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.2, 'triangle', 0.22)),
@@ -677,7 +679,8 @@
       await flyCard(b, from, FX.rectOf(pileEl(p, b)) || pileRect(p), { dur: T.flip + 60, flip: true, pop: 0.4 }, () => sfx.slap());
       if (S !== game) return undefined;
       sfx.points();
-      await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', '한 장 더 뒤집어요', 650, 'points');
+      const oppPi = S.captured[1 - p].some(x => C[x].kind === 'pi') && (R.handsLeft(S, 0) + R.handsLeft(S, 1) > 0);
+      await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', (oppPi ? (p === 0 ? '상대 피 1장 · ' : '피 1장 뺏겨요 · ') : '') + '한 장 더 뒤집어요', 650, 'points');
       if (S !== game) return undefined;
     }
     if (d === null) return null;
@@ -722,12 +725,14 @@
     return out;
   }
 
-  // 보너스패: 손에서 내면 먹고, 더미에서 한 장 받아 같은 차례 계속
+  // 보너스패: 손에서 내면 먹고, 상대 피 1장 가져오고, 더미에서 한 장 받아 같은 차례 계속
   async function doBonus(id) {
     const game = S, p = S.turn;
     const from = p === 0 ? FX.rectOf(handEl(id)) : oppBackRects(1)[0];
+    const before = snapshotRects(); // 뺏어 올 피의 원래 자리
     const r = R.play(S, id);
     hidden.add(id);
+    r.stolen.forEach(x => hidden.add(x));
     if (r.drawn !== null) hidden.add(r.drawn);
     render();
     await flyCard(id, from, FX.rectOf(pileEl(p, id)), { dur: T.play + 60, flip: p === 1, arc: 20 }, () => sfx.slap());
@@ -740,8 +745,13 @@
       FX.remove(el);
     }
     if (S !== game) return;
+    if (r.stolen.length) { // 상대 피 1장: 상대 더미 → 내 더미
+      await sleep(60);
+      await animSteal(p, { stolen: r.stolen }, before);
+      if (S !== game) return;
+    }
     sfx.points();
-    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요') : '한 장 더', 700, 'points');
+    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요 · 한 장 더') : '한 장 더', 700, 'points');
     if (S !== game) return;
     saveGame();
     if (p === 1) { aiTurn(); return; }
@@ -763,9 +773,11 @@
       const bombCards = opt.bomb && R.canBomb(S, id) ? S.hands[p].filter(x => C[x].month === C[id].month) : [id];
       const from = p === 0 ? bombCards.map(x => FX.rectOf(handEl(x))) : oppBackRects(bombCards.length);
       const hadMatch = S.floor.some(f => same(f, id));
+      const shookBefore = S.shake[p];
       const res = R.play(S, id, opt);
+      const shookNow = S.shake[p] > shookBefore; // 이번 패로 흔들기를 했을 때만 연출 (컴퓨터는 늘 shake:true 를 보냄)
       const ids = res.bomb ? S.pending.cards.slice() : [id];
-      if (opt.shake && S.shake[p] && !res.bomb) {
+      if (shookNow && !res.bomb) {
         render();
         sfx.rattle();
         await showcase([id, ...S.hands[p].filter(x => same(x, id))],
@@ -1100,16 +1112,17 @@
     busy = true;
     showScreen(gameEl);
     setMsg('');
+    const game = S;
+    await dealAnim(game); // 패 돌리기
+    if (S !== game) return;
     render();
     if (S.phase === 'over') { // 총통 또는 바닥 총통
-      const game = S;
       if (S.over.draw) await flash('나가리!', S.over.reason, 1400);
       else {
         const w = S.over.winner;
         const m = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].find(mm => S.hands[w].filter(x => C[x].month === mm).length === 4);
-        showModalCards(`${w === 0 ? '내' : '컴퓨터'} 총통! (${m}월 4장)`, S.hands[w].filter(x => C[x].month === m));
-        await sleep(1800);
-        hideModal();
+        sfx.yaku();
+        await showcase(S.hands[w].filter(x => C[x].month === m), { title: (w === 0 ? '' : '컴퓨터 ') + '총통!', sub: `${m}월 4장`, kind: 'yaku', ms: 1800 });
       }
       if (S === game) proceed();
       return;
@@ -1119,6 +1132,45 @@
     if ((S.mult || 1) > 1) toast(`나가리 다음 판! 점수 ×${S.mult}`);
     else if (S.turn === 1) toast('컴퓨터가 먼저 시작해요 (선)');
     proceed();
+  }
+
+  // 새 판 시작: 더미에서 한 장씩 돌리기 (바닥 4 → 컴퓨터 5 → 나 5, 두 바퀴). 컴퓨터 패는 뒷면 그대로
+  async function dealAnim(game) {
+    const mine = S.hands[0].slice(), floor = S.floor.slice();
+    mine.concat(floor).forEach(id => hidden.add(id));
+    render();
+    const backs = [...document.querySelectorAll('#opp-hand .hw.back')];
+    backs.forEach(b => b.classList.add('ghost'));
+    const from = deckRect();
+    if (!from) { hidden.clear(); return; }
+    const seq = [];
+    for (let r = 0; r < 2; r++) {
+      floor.slice(r * 4, r * 4 + 4).forEach(id => seq.push({ id, to: () => FX.rectOf(floorEl(id)) }));
+      backs.slice(r * 5, r * 5 + 5).forEach(el => seq.push({ el, to: () => FX.rectOf(el) }));
+      mine.slice(r * 5, r * 5 + 5).forEach(id => seq.push({ id, to: () => FX.rectOf(handEl(id)) }));
+    }
+    const GAP = 38, GROUP = 70; // 한 장 간격 / 묶음 사이 쉼 (ms)
+    let t = 0;
+    const jobs = seq.map((c, i) => {
+      if (i && (i === 4 || i === 9 || i === 14 || i === 18 || i === 23)) t += GROUP;
+      const at = t;
+      t += GAP;
+      return (async () => {
+        await sleep(at);
+        if (S !== game) return;
+        sfx.deal();
+        if (c.el) { // 컴퓨터 손패: 뒷면 그대로
+          const el = await FX.fly({ front: ART.back(), from, to: c.to(), dur: 190 });
+          c.el.classList.remove('ghost');
+          FX.remove(el);
+        } else {
+          await flyCard(c.id, from, c.to(), { dur: 190, flip: true });
+        }
+      })();
+    });
+    await Promise.all(jobs);
+    hidden.clear();
+    await sleep(120);
   }
 
   function resume() {
@@ -1152,7 +1204,7 @@
         <li><b>7점</b>이 나면 <b>고</b>(계속) 또는 <b>스톱</b>. 고 할 때마다 +1점, 3고부터는 고마다 점수 2배.</li>
         <li>광 3장 3점(비광 끼면 2점)·4장 4점·5장 15점 / 열끗·띠 5장부터 1점 / 피 10장부터 1점</li>
         <li>고도리 5점 · 홍단·청단·초단 3점 · 9월 국진은 열끗이나 쌍피 중 유리한 쪽</li>
-        <li>보너스패는 내면 먹고 한 장 더 받아요.</li>
+        <li>보너스패는 내거나 뒤집어서 먹으면 상대 피 1장을 가져오고, 한 장 더 받아요(뒤집어요).</li>
         <li>쪽·따닥·싹쓸이·뻑 먹기·폭탄: 상대 피 1장 (자뻑 2장)</li>
         <li><b>흔들기</b>(같은 달 3장)·<b>폭탄</b>(3장+바닥 1장): 이기면 2배</li>
         <li>피박(피로 났을 때 상대 피 7장 이하)·광박·멍따(열끗 7장 이상)·고박: 각각 2배</li>

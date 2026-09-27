@@ -225,7 +225,7 @@
     if (isBonus(cardId)) {
       rm(cardId);
       s.captured[p].push(cardId);
-      const stolen = []; // 표준 맞고: 보너스패로는 상대 피를 뺏지 않음
+      const stolen = stealPi(s, p, 1); // 한게임 신맞고: 보너스패를 먹으면 상대 피 1장 (상대 피가 없으면 없음)
       const drawn = s.deck.length ? s.deck.pop() : null;
       if (drawn !== null) hand.push(drawn);
       s.last = { player: p, played: cardId, flipped: null, taken: [cardId], events: ['bonus'], stolen, drawn };
@@ -313,7 +313,7 @@
       s.captured[p].push(b);
       bonusGot.push(b);
     }
-    if (bonusGot.length) ev.push('bonusFlip');
+    if (bonusGot.length) { ev.push('bonusFlip'); steal += bonusGot.length; } // 뒤집어서 먹은 보너스패도 1장마다 상대 피 1장
     const d = s.deck.length ? s.deck.pop() : null;
     const n = d === null ? null : month(d);
     const lastTurn = handsLeft(s, 0) + handsLeft(s, 1) === 0;
