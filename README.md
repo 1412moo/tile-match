@@ -1,15 +1,28 @@
-# 타일 매치 (개인용 오프라인 게임)
+# 엄마 게임천국 (개인용 오프라인 미니게임 모음)
 
-같은 그림 타일 3개를 모으면 사라지는 3매치 타일 게임. 광고·결제·로그인·서버 없음.
+하나의 PWA 안에서 여러 미니게임을 골라 하는 개인용 앱. 광고·결제·로그인·서버·추적 없음.
 순수 HTML/CSS/JS, 외부 라이브러리·이미지·사운드 파일 없음 (그림은 시스템 이모지, 효과음은 Web Audio 합성).
 
-## 파일
-- `index.html`, `style.css` — 화면
-- `levels.js` — 레벨 생성 (레벨 번호로 항상 같은 보드, 풀 수 있는 것이 보장됨, 난이도 자동 보정)
-- `game.js` — 게임 진행, 부스터, 저장, 효과음
-- `sw.js`, `manifest.webmanifest`, `icons/` — 오프라인 실행 / 홈 화면 앱 설치
-- `tools/serve.js` — 테스트용 로컬 서버, `tools/make-icons.js` — 아이콘 PNG 생성
-- `tools/test.js` — 자동 테스트 (`node tools/test.js`): 문법, 레벨 1~100 무결성, 레벨 풀이 가능, 섞기 후 풀이 가능
+## 구조
+```
+index.html, hub.css, hub.js   게임 선택 메인 화면 (앱을 열면 처음 보이는 화면)
+games/registry.js             게임 목록 (이름·아이콘·경로·준비 여부·저장 키·오프라인 파일)
+games/tile-match/             타일 매치(같은 그림 3개 모으기) - index.html, style.css, levels.js, game.js
+games/<새 게임>/               앞으로 추가할 게임 (고스톱, 틀린그림찾기, 수박게임은 목록에 '준비중'으로 등록됨)
+sw.js, manifest.webmanifest, icons/   앱 전체 공용 오프라인 캐시 / 홈 화면 설치 (루트에 하나만)
+tools/serve.js    테스트용 로컬 서버        tools/make-icons.js  아이콘 PNG 생성
+tools/test.js     자동 테스트 (`node tools/test.js`): 문법, 버전 일치, 게임 목록 파일 존재, 타일 매치 레벨/섞기 검증
+```
+
+### 새 게임 추가하는 법
+1. `games/<id>/` 폴더에 `index.html` 등 게임 파일을 만든다 (상대 경로 사용, 메인으로는 `../../`).
+2. `games/registry.js` 의 해당 항목에서 `ready: true`, `files` 에 오프라인 저장할 파일 목록을 적는다.
+   서비스 워커가 이 목록을 읽어 자동으로 오프라인 저장한다.
+3. 저장은 `localStorage` 의 게임별 키(`<id>.save.v1`)만 사용한다. 다른 게임의 키는 건드리지 않는다.
+   타일 매치는 기존 키 `tilematch.save.v1` 을 그대로 쓴다 (바꾸면 엄마의 진행이 사라지므로 변경 금지).
+4. 게임 첫 화면에 "← 게임 목록" 버튼을 두고, 타일 매치 `game.js` 의 `btn-hub` 처리처럼
+   메인에서 들어왔으면 `history.back()`, 아니면 `location.replace('../../')` 로 돌아간다.
+5. 서비스 워커는 루트 것 하나만 쓴다: `navigator.serviceWorker.register('../../sw.js', { scope: '../../' })`.
 
 ## PC에서 실행
 ```
@@ -24,12 +37,13 @@ node tools/serve.js 8080
 2. 메뉴 → **홈 화면에 추가 / 앱 설치**
 3. 한 번 열고 나면 이후로는 인터넷 없이도 실행되고, 진행 상황은 폰에 저장됨
 
-게임 파일을 고친 뒤 배포할 때는 버전 번호를 세 곳에서 같이 올린다 (`node tools/test.js` 가 불일치를 잡아 준다):
-`sw.js` 의 `VERSION`, `game.js` 의 `APP_VERSION`, `index.html` 의 `?v=` (3개). 홈 화면 아래에 `버전 N` 으로 표시된다.
+파일을 고친 뒤 배포할 때는 버전 번호를 모두 같이 올린다 (`node tools/test.js` 가 불일치를 잡아 준다):
+`sw.js` 의 `VERSION`, `games/registry.js` 의 `APP_VERSION`, 각 게임 `game.js` 의 `APP_VERSION`,
+모든 HTML 의 `?v=`. 메인 화면과 게임 첫 화면 아래에 `버전 N` 으로 표시된다.
 온라인이면 앱을 여는 즉시 새 버전이 뜨고(최신 파일 우선, 3초 안에 응답이 없으면 저장된 파일), 오프라인이면 저장된 버전으로 실행된다.
 게임 진행 데이터(localStorage)는 업데이트와 무관하게 유지된다.
 
-## 규칙 / 기능
+## 타일 매치 규칙 / 기능
 - 밝은 타일만 누를 수 있음 (어두운 타일은 위에 다른 타일이 겹쳐 있음)
 - 누른 타일은 아래 7칸으로 이동, 같은 그림 옆에 정렬, 3개 모이면 사라짐
 - 7칸이 다 차면 실패, 모든 타일을 없애면 클리어 → 다음 레벨

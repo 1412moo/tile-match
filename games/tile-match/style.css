@@ -212,3 +212,23 @@ h1 { margin: 0; font-size: 44px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 }
 
 .version { margin: 4px 0 0; font-size: 13px; opacity: .55; }
+
+/* 게임 모음 메인 화면으로 돌아가는 버튼 */
+.hub-back {
+  align-self: flex-start; flex: none; margin: 10px 0 0 10px;
+  min-height: 48px; padding: 0 16px; border-radius: 14px; font-size: 18px; font-weight: 700;
+  color: var(--ink); background: rgba(255, 255, 255, .9); box-shadow: 0 4px 0 rgba(0, 0, 0, .2);
+}
+.hub-back:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, .2); }
+
+/* 짧은 화면: 타일 매치 첫 화면(메뉴)을 조금 촘촘하게 해서 한 화면에 모두 보이게 */
+@media (max-height: 700px) {
+  .home-inner { gap: 10px; padding: 8px 24px 12px; }
+  .logo { margin-bottom: 0; }
+  .logo-tile { width: 48px; height: 56px; font-size: 30px; border-radius: 10px; }
+  h1 { font-size: 34px; }
+  .sub { margin: 0 0 4px; font-size: 17px; }
+  .home-inner .btn { padding-top: 11px; padding-bottom: 11px; min-height: 48px; }
+  .home-inner .btn.big { padding: 10px 36px 9px; font-size: 26px; }
+  .btn.light.small { margin-top: 0; }
+}

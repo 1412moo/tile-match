@@ -3,7 +3,7 @@
 
   const { EMOJIS, generateLevel, levelParams, overlaps, solvableShuffle } = window.TM_Levels;
 
-  const APP_VERSION = 4; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 6; // sw.js 의 VERSION 과 같게 유지
   const SLOT_SIZE = 7;
   const BOOSTER_START = { undo: 3, shuffle: 2, hint: 3 }; // 레벨마다 다시 채워짐
   const SAVE_KEY = 'tilematch.save.v1';
@@ -515,6 +515,13 @@
   $('#btn-new').addEventListener('click', () => { sfx.unlock(); newGameClick(); });
   $('#btn-stages').addEventListener('click', () => { sfx.unlock(); showStages(); });
   $('#btn-stages-back').addEventListener('click', goHome);
+  // 게임 모음 메인 화면으로: 메인에서 들어왔으면 뒤로 가기(기록이 쌓이지 않게), 아니면 이동
+  $('#btn-hub').addEventListener('click', () => {
+    let fromHub = false;
+    try { fromHub = sessionStorage.getItem('hub.opened') === '1'; } catch (e) { /* 무시 */ }
+    if (fromHub && history.length > 1) history.back();
+    else location.replace('../../');
+  });
   $('#pg-prev').addEventListener('click', () => showStages(stagePage - 1));
   $('#pg-next').addEventListener('click', () => showStages(stagePage + 1));
   $('#btn-sound-home').addEventListener('click', toggleSound);
@@ -548,6 +555,7 @@
 
   // 오프라인 실행을 위한 서비스 워커 (http(s)로 열었을 때만)
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => { });
+    // 서비스 워커는 앱 전체(루트)에 하나만 둔다
+    navigator.serviceWorker.register('../../sw.js', { scope: '../../' }).catch(() => { });
   }
 })();

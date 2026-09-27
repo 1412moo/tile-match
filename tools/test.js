@@ -1,5 +1,5 @@
 // 게임 로직 자동 테스트: node tools/test.js
-const L = require('../levels.js');
+const L = require('../games/tile-match/levels.js');
 const SLOT = 7;
 let failures = 0;
 const fail = msg => { failures++; console.log('  FAIL ' + msg); };
@@ -44,21 +44,46 @@ function countTypes(types) {
   return JSON.stringify(Object.keys(c).sort().map(k => [k, c[k]]));
 }
 
-// 0) 브라우저용 스크립트 문법 검사
-console.log('[0] game.js / sw.js 문법 검사');
-for (const f of ['game.js', 'sw.js']) {
-  try { new Function(require('fs').readFileSync(require('path').join(__dirname, '..', f), 'utf8')); }
-  catch (e) { fail(`${f}: ${e.message}`); }
-}
-
+// 0) 앱 구조 검사: 문법, 버전 일치, 게임 목록의 파일 존재
+console.log('[0] 문법 / 버전 일치 / 게임 목록 파일 검사');
 {
-  const read = f => require('fs').readFileSync(require('path').join(__dirname, '..', f), 'utf8');
-  const appV = (read('game.js').match(/APP_VERSION = (\d+)/) || [])[1];
+  const fs = require('fs'), path = require('path');
+  const ROOT = path.join(__dirname, '..');
+  const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+  for (const f of ['sw.js', 'hub.js', 'games/registry.js', 'games/tile-match/game.js']) {
+    try { new Function(read(f)); } catch (e) { fail(`${f}: ${e.message}`); }
+  }
+  global.self = global;
+  require('../games/registry.js');
+  const games = global.GAME_REGISTRY;
   const swV = (read('sw.js').match(/const VERSION = (\d+)/) || [])[1];
-  if (!appV || appV !== swV) fail(`버전 불일치: game.js APP_VERSION=${appV}, sw.js VERSION=${swV}`);
-  // index.html 의 파일 주소에 붙은 ?v= 도 같은 버전이어야 새 버전이 캐시에 가려지지 않는다
-  const tags = read('index.html').match(/\?v=\d+/g) || [];
-  if (tags.length !== 3 || tags.some(t => t !== `?v=${swV}`)) fail(`index.html 버전 태그 불일치: ${tags.join(',')} (sw.js VERSION=${swV})`);
+  if (String(global.APP_VERSION) !== swV) fail(`버전 불일치: registry APP_VERSION=${global.APP_VERSION}, sw.js VERSION=${swV}`);
+  // 각 게임의 APP_VERSION 과 모든 HTML 의 ?v= 도 같아야 새 버전이 캐시에 가려지지 않는다
+  const htmls = ['index.html'];
+  const ids = new Set();
+  for (const g of games) {
+    if (ids.has(g.id)) fail(`게임 id 중복: ${g.id}`);
+    ids.add(g.id);
+    if (!g.name || !g.icon || !g.path || !g.storageKey) fail(`게임 항목 정보 부족: ${g.id}`);
+    if (!g.ready) continue;
+    for (const f of g.files) if (f && !fs.existsSync(path.join(ROOT, g.path, f))) fail(`${g.id}: 파일 없음 ${g.path + f}`);
+    htmls.push(g.path + 'index.html');
+    const gameJs = path.join(ROOT, g.path, 'game.js');
+    if (fs.existsSync(gameJs)) {
+      const v = (fs.readFileSync(gameJs, 'utf8').match(/APP_VERSION = (\d+)/) || [])[1];
+      if (v !== swV) fail(`${g.id}: game.js APP_VERSION=${v}, sw.js VERSION=${swV}`);
+    }
+  }
+  const keys = games.map(g => g.storageKey);
+  if (new Set(keys).size !== keys.length) fail('게임 저장 키 중복');
+  if (games[0].storageKey !== 'tilematch.save.v1') fail('타일 매치 기존 저장 키(tilematch.save.v1)가 바뀜');
+  for (const h of htmls) {
+    const tags = read(h).match(/\?v=\d+/g) || [];
+    if (!tags.length || tags.some(t => t !== `?v=${swV}`)) fail(`${h} 버전 태그 불일치: ${tags.join(',')} (sw.js VERSION=${swV})`);
+  }
+  for (const f of ['manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'hub.css']) {
+    if (!fs.existsSync(path.join(ROOT, f))) fail(`파일 없음: ${f}`);
+  }
 }
 
 // 1) 레벨 무결성
