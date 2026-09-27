@@ -1,5 +1,5 @@
 // 오프라인 캐시: 저장된 파일로 즉시 실행하고, 온라인이면 뒤에서 새 버전을 받아 둔다.
-const CACHE = 'tilematch-v2';
+const CACHE = 'tilematch-v3';
 const ASSETS = ['./', 'index.html', 'style.css', 'levels.js', 'game.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 

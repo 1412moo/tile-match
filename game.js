@@ -10,7 +10,7 @@
   const LIFT = 0.07;       // 층마다 위로 올라가는 정도 (타일 너비 비율)
 
   const $ = sel => document.querySelector(sel);
-  const homeEl = $('#home'), gameEl = $('#game'), boardArea = $('#board-area');
+  const homeEl = $('#home'), gameEl = $('#game'), stagesEl = $('#stages'), boardArea = $('#board-area');
   const slotBar = $('#slot-bar'), tilesEl = $('#tiles'), overlay = $('#overlay');
   const slotCells = [...slotBar.querySelectorAll('.slot-cell')];
 
@@ -115,19 +115,110 @@
   }
 
   // ---------------- 화면 전환 ----------------
+  function showScreen(el) {
+    [homeEl, gameEl, stagesEl].forEach(s => s.classList.toggle('hidden', s !== el));
+    // 홈이 아닌 화면에서는 휴대폰 '뒤로' 버튼이 앱을 닫지 않고 홈으로 오도록 기록을 하나 쌓는다
+    if (el !== homeEl && !(history.state && history.state.tm)) {
+      try { history.pushState({ tm: 1 }, ''); } catch (e) { /* 무시 */ }
+    }
+  }
+
   function showHome() {
     clearHint();
-    gameEl.classList.add('hidden');
-    homeEl.classList.remove('hidden');
-    const resume = save.current && save.current.level === save.level;
-    $('#btn-play').textContent = resume ? `레벨 ${save.level} 계속하기` : `레벨 ${save.level} 시작`;
+    hideModal();
+    showScreen(homeEl);
+    const cur = save.current;
+    $('#continue-sub').textContent = cur ? `레벨 ${cur.level} · 하던 판 이어서` : `레벨 ${save.level}`;
     updateSoundButtons();
+  }
+
+  // 홈으로 (버튼): 진행 저장 후 홈 화면, 쌓아 둔 '뒤로' 기록도 정리
+  let skipPop = false;
+  function goHome() {
+    if (G && !G.busy) saveProgress();
+    G = null;
+    showHome();
+    if (history.state && history.state.tm) { skipPop = true; history.back(); }
+  }
+
+  // 휴대폰 '뒤로' 버튼
+  window.addEventListener('popstate', () => {
+    if (skipPop) { skipPop = false; return; }
+    if (G && G.busy) { // 매칭/결과 처리 중에는 무시하고 현재 화면 유지
+      try { history.pushState({ tm: 1 }, ''); } catch (e) { /* 무시 */ }
+      return;
+    }
+    if (G) saveProgress();
+    G = null;
+    showHome();
+  });
+
+  // 이어하기: 하던 판이 있으면 그 판, 없으면 아직 못 깬 레벨
+  function continueGame() {
+    if (save.current) startLevel(save.current.level, true);
+    else startLevel(save.level, false);
+  }
+
+  // 새 게임: 하던 판을 버리고 도전할 레벨을 처음부터
+  function newGameClick() {
+    const start = () => startLevel(save.level, false);
+    if (!save.current) return start();
+    showModal({
+      emoji: '🆕', title: '새 게임을 시작할까요?',
+      text: `하던 판(레벨 ${save.current.level})은 지워지고
+레벨 ${save.level}부터 새로 시작해요.`,
+      buttons: [
+        { label: '새로 시작', onClick: start },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
+  }
+
+  // ---------------- 스테이지 선택 ----------------
+  const PAGE = 20;
+  let stagePage = 0;
+  function showStages(page) {
+    const lastPage = Math.floor((save.level - 1) / PAGE);
+    stagePage = Math.max(0, Math.min(lastPage, page === undefined ? lastPage : page));
+    const grid = $('#stage-grid');
+    grid.innerHTML = '';
+    const first = stagePage * PAGE + 1;
+    for (let lv = first; lv < first + PAGE; lv++) {
+      const b = document.createElement('button');
+      const state = lv < save.level ? 'cleared' : lv === save.level ? 'current' : 'locked';
+      b.className = 'stage ' + state;
+      b.innerHTML = state === 'locked' ? '<span class="mark">🔒</span>'
+        : `${lv}<span class="mark">${state === 'cleared' ? '✓' : '▶'}</span>`;
+      if (save.current && save.current.level === lv) b.insertAdjacentHTML('beforeend', '<span class="tag">진행 중</span>');
+      b.setAttribute('aria-label', `레벨 ${lv}` + (state === 'locked' ? ' 잠김' : ''));
+      b.addEventListener('click', () => pickStage(lv));
+      grid.appendChild(b);
+    }
+    $('#pg-label').textContent = `${first} – ${first + PAGE - 1}`;
+    $('#pg-prev').disabled = stagePage === 0;
+    $('#pg-next').disabled = stagePage === lastPage;
+    showScreen(stagesEl);
+    grid.scrollTop = 0;
+  }
+
+  function pickStage(lv) {
+    sfx.unlock();
+    if (lv > save.level) { sfx.blocked(); return toast('앞 레벨을 먼저 깨면 열려요'); }
+    const cur = save.current;
+    if (!cur || cur.level === lv) return startLevel(lv, true); // 하던 판이면 이어서
+    showModal({
+      emoji: '🎯', title: `레벨 ${lv} 시작할까요?`,
+      text: `하던 판(레벨 ${cur.level})은 지워져요.`,
+      buttons: [
+        { label: '시작', onClick: () => startLevel(lv, false) },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
   }
 
   function startLevel(level, resume) {
     hideModal();
-    homeEl.classList.add('hidden');
-    gameEl.classList.remove('hidden');
+    showScreen(gameEl);
     G = resume && save.current && save.current.level === level ? restoreGame(save.current) : newGame(level);
     const all = G.tiles;
     G.bounds = {
@@ -284,7 +375,7 @@
       emoji: '🎉', title: `레벨 ${lv} 클리어!`, text: '잘하셨어요!',
       buttons: [
         { label: '다음 레벨 ▶', onClick: () => startLevel(lv + 1, false) },
-        { label: '홈으로', cls: 'light', onClick: () => { G = null; showHome(); } },
+        { label: '홈으로', cls: 'light', onClick: goHome },
       ],
     }), 250);
   }
@@ -296,7 +387,7 @@
       emoji: '😢', title: '칸이 가득 찼어요', text: '다시 도전해 보세요!',
       buttons: [
         { label: '다시 하기', onClick: () => startLevel(lv, false) },
-        { label: '홈으로', cls: 'light', onClick: () => { G = null; showHome(); } },
+        { label: '홈으로', cls: 'light', onClick: goHome },
       ],
     });
   }
@@ -419,14 +510,17 @@
   }
 
   // ---------------- 이벤트 연결 ----------------
-  $('#btn-play').addEventListener('click', () => { sfx.unlock(); startLevel(save.level, true); });
+  $('#btn-continue').addEventListener('click', () => { sfx.unlock(); continueGame(); });
+  $('#btn-new').addEventListener('click', () => { sfx.unlock(); newGameClick(); });
+  $('#btn-stages').addEventListener('click', () => { sfx.unlock(); showStages(); });
+  $('#btn-stages-back').addEventListener('click', goHome);
+  $('#pg-prev').addEventListener('click', () => showStages(stagePage - 1));
+  $('#pg-next').addEventListener('click', () => showStages(stagePage + 1));
   $('#btn-sound-home').addEventListener('click', toggleSound);
   $('#btn-sound').addEventListener('click', toggleSound);
   $('#btn-home').addEventListener('click', () => {
     if (G && G.busy) return; // 매칭/결과 처리 중에는 무시
-    if (G) saveProgress();
-    G = null;
-    showHome();
+    goHome();
   });
   $('#btn-restart').addEventListener('click', () => {
     if (!G || G.busy) return;

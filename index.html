@@ -21,9 +21,26 @@
         </div>
         <h1>타일 매치</h1>
         <p class="sub">같은 그림 3개를 모으면 사라져요</p>
-        <button id="btn-play" class="btn big">레벨 1 시작</button>
-        <button id="btn-sound-home" class="btn light">🔊 소리 켜짐</button>
+        <button id="btn-continue" class="btn big">이어하기<small id="continue-sub">레벨 1</small></button>
+        <button id="btn-new" class="btn light">새 게임</button>
+        <button id="btn-stages" class="btn light">스테이지 선택</button>
+        <button id="btn-sound-home" class="btn light small">🔊 소리 켜짐</button>
       </div>
+    </section>
+
+    <section id="stages" class="screen hidden">
+      <header class="topbar">
+        <button id="btn-stages-back" class="icon-btn" aria-label="뒤로">←</button>
+        <div class="screen-title">스테이지 선택</div>
+        <div class="topbar-spacer"></div>
+      </header>
+      <div id="stage-grid"></div>
+      <div class="pager">
+        <button id="pg-prev" class="icon-btn" aria-label="이전">◀</button>
+        <span id="pg-label">1 – 20</span>
+        <button id="pg-next" class="icon-btn" aria-label="다음">▶</button>
+      </div>
+      <p class="legend"><span class="lg cleared">✓</span> 클리어 <span class="lg current">▶</span> 도전 <span class="lg locked">🔒</span> 잠김</p>
     </section>
 
     <section id="game" class="screen hidden">
