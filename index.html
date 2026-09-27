@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1f5e46">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>타일 매치</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <section id="home" class="screen">
+      <div class="home-inner">
+        <div class="logo">
+          <div class="logo-tile">🍓</div><div class="logo-tile">🍓</div><div class="logo-tile">🍓</div>
+        </div>
+        <h1>타일 매치</h1>
+        <p class="sub">같은 그림 3개를 모으면 사라져요</p>
+        <button id="btn-play" class="btn big">레벨 1 시작</button>
+        <button id="btn-sound-home" class="btn light">🔊 소리 켜짐</button>
+      </div>
+    </section>
+
+    <section id="game" class="screen hidden">
+      <header class="topbar">
+        <button id="btn-home" class="icon-btn" aria-label="홈">🏠</button>
+        <div id="level-label">레벨 1</div>
+        <button id="btn-sound" class="icon-btn" aria-label="소리">🔊</button>
+        <button id="btn-restart" class="icon-btn" aria-label="다시 하기">↻</button>
+      </header>
+      <div id="tip"></div>
+      <div id="board-area"></div>
+      <div id="slot-bar">
+        <div class="slot-cell"></div><div class="slot-cell"></div><div class="slot-cell"></div>
+        <div class="slot-cell"></div><div class="slot-cell"></div><div class="slot-cell"></div>
+        <div class="slot-cell"></div>
+      </div>
+      <div id="boosters">
+        <button class="booster" id="b-undo"><span class="b-ico">↶</span><span class="b-name">되돌리기</span><span class="b-count">3</span></button>
+        <button class="booster" id="b-shuffle"><span class="b-ico">🔀</span><span class="b-name">섞기</span><span class="b-count">2</span></button>
+        <button class="booster" id="b-hint"><span class="b-ico">💡</span><span class="b-name">힌트</span><span class="b-count">3</span></button>
+      </div>
+      <div id="tiles"></div>
+    </section>
+
+    <div id="overlay" class="hidden">
+      <div class="modal">
+        <div class="modal-emoji"></div>
+        <h2 class="modal-title"></h2>
+        <p class="modal-text"></p>
+        <div class="modal-btns"></div>
+      </div>
+    </div>
+    <div id="toast" class="hidden"></div>
+  </div>
+  <script src="levels.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
