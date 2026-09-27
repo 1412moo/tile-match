@@ -169,5 +169,112 @@ console.log('[4] 섞어도 풀 수 없는 상태 → 거절');
   if (res !== null) fail('불가능한 상태인데 섞기 결과를 돌려줌');
 }
 
+// ================= 고스톱 =================
+const GS = require('../games/gostop/rules.js');
+{
+  console.log('[5] 고스톱 패 구성 / 점수 계산');
+  const C = GS.CARDS;
+  const count = k => C.filter(c => c.kind === k).length;
+  if (C.length !== 48) fail(`패 수 ${C.length}`);
+  for (let m = 1; m <= 12; m++) if (C.filter(c => c.month === m).length !== 4) fail(`${m}월 패가 4장이 아님`);
+  if (count('gwang') !== 5 || count('yeol') !== 9 || count('tti') !== 10 || count('pi') !== 24) fail('광/열/띠/피 장수 이상');
+  if (C.filter(c => c.bird).length !== 3) fail('고도리 새 3장이 아님');
+  for (const d of ['hong', 'cheong', 'cho']) if (C.filter(c => c.dan === d).length !== 3) fail(`${d}단 3장이 아님`);
+  const ids = f => C.filter(f).map(c => c.id);
+  const eq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기대 ${want})`); };
+  eq('3광(비광 없음)', GS.score(ids(c => c.kind === 'gwang' && !c.rain).slice(0, 3)).total, 3);
+  eq('3광(비광 포함)', GS.score([...ids(c => c.kind === 'gwang' && !c.rain).slice(0, 2), ...ids(c => c.rain)]).total, 2);
+  eq('4광', GS.score(ids(c => c.kind === 'gwang').slice(0, 4)).total, 4);
+  eq('5광', GS.score(ids(c => c.kind === 'gwang')).total, 15);
+  eq('고도리', GS.score(ids(c => c.bird)).total, 5);
+  eq('홍단', GS.score(ids(c => c.dan === 'hong')).total, 3);
+  eq('띠 5장 + 청단', GS.score([...ids(c => c.dan === 'cheong'), ...ids(c => c.dan === 'cho').slice(0, 2)]).total, 3 + 1);
+  eq('열끗 6장(고도리 없음)', GS.score(ids(c => c.kind === 'yeol' && !c.bird).slice(0, 6)).total, 2);
+  eq('피 10장', GS.score(ids(c => c.kind === 'pi' && c.pi === 1).slice(0, 10)).total, 1);
+  eq('쌍피 포함 피 12', GS.score([...ids(c => c.pi === 2), ...ids(c => c.pi === 1).slice(0, 8)]).total, 3);
+  eq('피 9장', GS.score(ids(c => c.pi === 1).slice(0, 9)).total, 0);
+}
+{
+  console.log('[6] 고스톱 특수 상황 (쪽/뻑/따닥/싹쓸이/뻑 먹기/고박)');
+  const C = GS.CARDS;
+  const of = (m, k) => C.filter(c => c.month === m && (!k || c.kind === k)).map(c => c.id);
+  // 빈 판을 만들어 원하는 상황을 구성
+  const base = () => ({ deck: [], floor: [], hands: [[], []], captured: [[], []], turn: 0, first: 0, go: [0, 0], goScore: [0, 0], ppeok: {}, pending: null, phase: 'play', over: null, last: null });
+  const opPi = () => of(11, 'pi').filter(id => C[id].pi === 1).slice(0, 2); // 상대가 가진 피 2장
+  const filler = of(10, 'pi')[0]; // 더미가 비지 않게 (싹쓸이 판정용)
+
+  // 쪽: 바닥에 3월 없음, 3월 광을 내고 3월 피를 뒤집음
+  let s = base(); s.hands[0] = [of(3, 'gwang')[0]]; s.hands[1] = [of(5)[0]]; s.floor = [of(1, 'pi')[0]];
+  s.deck = [filler, of(3, 'pi')[0]]; s.captured[1] = opPi();
+  GS.play(s, of(3, 'gwang')[0]); let r = GS.flip(s);
+  if (!r.events.includes('jjok') || r.stolen.length !== 1 || s.captured[0].length !== 3) fail(`쪽 처리 이상 ${JSON.stringify(r)}`);
+
+  // 뻑: 바닥 4월 1장, 4월 패를 내고 4월을 뒤집음 → 3장 바닥에 남음, 이후 4번째 4월로 가져가면 피 1장
+  s = base(); const m4 = of(4); s.hands[0] = [m4[1]]; s.hands[1] = [m4[3], of(6)[0]]; s.floor = [m4[0], of(1, 'pi')[0]];
+  s.deck = [filler, of(9, 'pi')[0], m4[2]]; s.captured[0] = opPi();
+  GS.play(s, m4[1]); r = GS.flip(s);
+  if (!r.events.includes('ppeok') || s.floor.filter(id => C[id].month === 4).length !== 3 || s.ppeok[4] !== 0) fail('뻑 처리 이상');
+  GS.endTurn(s); // 컴퓨터 차례
+  GS.play(s, m4[3]); r = GS.flip(s);
+  if (!r.events.includes('ppeokTake') || r.stolen.length !== 1 || s.captured[1].filter(id => C[id].month === 4).length !== 4) fail(`뻑 먹기 이상 ${JSON.stringify(r)}`);
+
+  // 따닥: 바닥 7월 2장, 7월을 내고 7월을 뒤집음 → 4장 + 피 1장
+  s = base(); const m7 = of(7); s.hands[0] = [m7[2]]; s.hands[1] = [of(6)[0]]; s.floor = [m7[0], m7[1], of(1, 'pi')[0]];
+  s.deck = [filler, m7[3]]; s.captured[1] = opPi();
+  GS.play(s, m7[2], m7[0]); r = GS.flip(s);
+  if (!r.events.includes('ttadak') || s.captured[0].filter(id => C[id].month === 7).length !== 4 || r.stolen.length !== 1) fail('따닥 처리 이상');
+
+  // 싹쓸이: 바닥 2장을 모두 가져감
+  s = base(); s.hands[0] = [of(2)[0]]; s.hands[1] = [of(6)[0]]; s.floor = [of(2)[1], of(9)[0]];
+  s.deck = [filler, of(9)[1]]; s.captured[1] = opPi();
+  GS.play(s, of(2)[0]); r = GS.flip(s);
+  if (!r.events.includes('sseul') || s.floor.length !== 0 || r.stolen.length !== 1) fail(`싹쓸이 처리 이상 ${JSON.stringify(r)}`);
+
+  // 같은 달 2장 중 고르기: 낸 패로 띠를 고르면 띠를 가져감
+  s = base(); const m6 = of(6); s.hands[0] = [m6[0]]; s.hands[1] = [of(5)[0]]; s.floor = [m6[1], m6[2]];
+  s.deck = [filler, of(12, 'gwang')[0]];
+  if (!GS.handOptions(s, m6[0])) fail('고르기 후보가 없음');
+  GS.play(s, m6[0], m6[2]); GS.flip(s);
+  if (!s.captured[0].includes(m6[2]) || !s.floor.includes(m6[1])) fail('고른 패를 가져가지 않음');
+
+  // 고박: 컴퓨터가 고를 했는데 내가 이기면 ×2
+  s = base(); s.go = [0, 1]; s.hands[0] = [of(5)[0]]; s.phase = 'gostop';
+  s.captured[0] = [...of(1, 'gwang'), ...of(3, 'gwang'), ...of(8, 'gwang'), ...of(2, 'yeol'), ...of(4, 'yeol')];
+  s.captured[1] = [of(11, 'gwang')[0], ...of(1, 'pi')];
+  GS.decide(s, false);
+  if (!s.over || s.over.winner !== 0 || !s.over.lines.some(l => l[0] === '고박') || s.over.points !== 6) fail(`고박/점수 이상 ${JSON.stringify(s.over)}`);
+}
+{
+  console.log('[7] 고스톱 컴퓨터끼리 2000판: 패 보존 / 종료 / 규칙 상황 발생');
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const seen = {}, results = { win0: 0, win1: 0, draw: 0 };
+  let broken = 0;
+  for (let g = 0; g < 2000 && broken < 5; g++) {
+    const s = GS.newRound(rnd, g % 2);
+    for (let step = 0; step < 100 && s.phase !== 'over'; step++) {
+      if (s.phase === 'gostop') { GS.decide(s, GS.aiGoStop(s)); continue; }
+      const { card, choice } = GS.aiPick(s, rnd);
+      GS.play(s, card, choice);
+      const opts = GS.flipOptions(s);
+      const r = GS.flip(s, opts ? GS.bestCard(opts) : null);
+      r.events.forEach(e => { seen[e] = (seen[e] || 0) + 1; });
+      GS.endTurn(s);
+      // 48장이 정확히 한 번씩 있어야 함
+      const all = [...s.deck, ...s.floor, ...s.hands[0], ...s.hands[1], ...s.captured[0], ...s.captured[1]];
+      if (all.length !== 48 || new Set(all).size !== 48) { broken++; fail(`패 보존 깨짐 (판 ${g})`); break; }
+      // 바닥에 같은 달이 4장 이상 쌓이면 안 됨
+      const fc = {};
+      s.floor.forEach(id => { fc[GS.month(id)] = (fc[GS.month(id)] || 0) + 1; });
+      if (Object.values(fc).some(v => v >= 4)) { broken++; fail(`바닥에 같은 달 4장 (판 ${g})`); break; }
+    }
+    if (s.phase !== 'over') { broken++; fail(`판이 끝나지 않음 (판 ${g})`); continue; }
+    if (s.over.draw) results.draw++; else results['win' + s.over.winner]++;
+    if (!s.over.draw && !(s.over.points >= GS.WIN_SCORE)) fail(`이긴 점수가 7점 미만 (판 ${g}): ${s.over.points}`);
+  }
+  console.log(`  결과 ${JSON.stringify(results)}  발생: ${JSON.stringify(seen)}`);
+  for (const e of ['jjok', 'ppeok', 'ttadak', 'sseul', 'ppeokTake']) if (!seen[e]) fail(`2000판 동안 '${e}' 가 한 번도 없음`);
+}
+
 console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
 process.exit(failures ? 1 : 0);

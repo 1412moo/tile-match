@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 8;
+  root.APP_VERSION = 9;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -24,11 +24,16 @@
       id: 'gostop',
       name: '고스톱',
       icon: '🃏',
-      desc: '화투로 즐기는 맞고',
+      desc: '컴퓨터와 둘이 치는 맞고',
       path: 'games/gostop/',
-      ready: false,
+      ready: true,
       storageKey: 'gostop.save.v1',
-      files: [],
+      files: ['', 'index.html', 'style.css', 'rules.js', 'game.js'],
+      summary: s => {
+        if (s.current) return '하던 판 있어요';
+        const t = s.stats || {};
+        return (t.wins || t.losses || t.draws) ? `${t.wins || 0}승 ${t.losses || 0}패` : '';
+      },
     },
     {
       id: 'spot-difference',

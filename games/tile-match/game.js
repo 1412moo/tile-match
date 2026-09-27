@@ -3,7 +3,7 @@
 
   const { EMOJIS, generateLevel, levelParams, overlaps, solvableShuffle } = window.TM_Levels;
 
-  const APP_VERSION = 8; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 9; // sw.js 의 VERSION 과 같게 유지
   const SLOT_SIZE = 7;
   const BOOSTER_START = { undo: 3, shuffle: 2, hint: 3 }; // 레벨마다 다시 채워짐
   const SAVE_KEY = 'tilematch.save.v1';
