@@ -156,6 +156,42 @@
     return b.total > a.total ? b : a;
   }
 
+  // ---------------- 족보 (화면 연출용 - 점수 계산은 score() 그대로) ----------------
+  // 3장짜리 족보: 고도리(새 3장), 홍단·청단·초단(띠 3장)
+  const YAKU = [
+    { key: 'godori', name: '고도리', pts: 5, ids: CARDS.filter(c => c.bird).map(c => c.id) },
+    { key: 'hong', name: '홍단', pts: 3, ids: CARDS.filter(c => c.dan === 'hong').map(c => c.id) },
+    { key: 'cheong', name: '청단', pts: 3, ids: CARDS.filter(c => c.dan === 'cheong').map(c => c.id) },
+    { key: 'cho', name: '초단', pts: 3, ids: CARDS.filter(c => c.dan === 'cho').map(c => c.id) },
+  ];
+  // 비상: 3장 중 2장을 모았고 남은 1장을 상대가 아직 안 먹어서 완성할 수 있는 족보
+  function yakuAlerts(mine, theirs) {
+    const out = [];
+    for (const y of YAKU) {
+      const have = y.ids.filter(id => mine.includes(id));
+      if (have.length !== 2) continue;
+      const missing = y.ids.find(id => !mine.includes(id));
+      if (theirs.includes(missing)) continue;
+      out.push({ key: y.key, name: y.name, pts: y.pts, have, missing });
+    }
+    return out;
+  }
+  // 이번에 새로 완성된 족보 (before → after 먹은 패). 광은 3·4·5장 점수가 새로 날 때
+  function newYaku(before, after) {
+    const out = [];
+    for (const y of YAKU) {
+      const done = ids => y.ids.every(id => ids.includes(id));
+      if (!done(before) && done(after)) out.push({ key: y.key, name: y.name, pts: y.pts, ids: y.ids.slice() });
+    }
+    const g0 = score(before, false), g1 = score(after, false);
+    if (g1.gwangScore > 0 && g1.gwangCount > g0.gwangCount) {
+      const n = g1.gwangCount;
+      out.push({ key: 'gwang' + n, name: n === 5 ? '오광' : n === 4 ? '사광' : g1.gwangScore === 2 ? '비삼광' : '삼광', pts: g1.gwangScore,
+        ids: after.filter(id => CARDS[id].kind === 'gwang') });
+    }
+    return out;
+  }
+
   // ---------------- 한 차례 진행 ----------------
   function floorMatches(s, m) { return s.floor.filter(id => month(id) === m); }
   function countMonth(ids, m) { return ids.filter(id => month(id) === m).length; }
@@ -464,7 +500,7 @@
     CARDS, N_CARDS, GUKJIN, MONTH_NAME, WIN_SCORE, PTS,
     newRound, upgradeState, score, bestScore, handOptions, canBomb, canShake, play, playDummy,
     peek, peekBonus, flipOptions, flip, endTurn, decide, netForPlayer, handsLeft,
-    aiPick, aiGoStop, bestCard, cardValue, month, isBonus,
+    aiPick, aiGoStop, bestCard, cardValue, month, isBonus, YAKU, yakuAlerts, newYaku,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.GS = api;

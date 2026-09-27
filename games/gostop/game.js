@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 13; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 14; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -116,10 +116,33 @@
       steal: () => { noise({ dur: 0.22, freq: 3400, freqTo: 900, q: 1.1, vol: 0.35, attack: 0.03 }); tone(1320, 0.17, 0.14, 'triangle', 0.13); },
       // '슥': 더미에서 한 장 받아 손으로
       draw: () => noise({ dur: 0.09, freq: 1600, freqTo: 2600, q: 1, vol: 0.25, attack: 0.015 }),
-      event: () => [660, 880, 1100].forEach((f, i) => tone(f, i * 0.07, 0.18, 'square', 0.08)),
       go: () => [523, 784, 1047].forEach((f, i) => tone(f, i * 0.09, 0.2, 'triangle', 0.22)),
       win: () => [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, i * 0.11, 0.22, 'triangle', 0.22)),
       lose: () => [392, 330, 262, 196].forEach((f, i) => tone(f, i * 0.18, 0.3, 'sawtooth', 0.07)),
+      // ---- 상황별 효과음 (전부 직접 합성) ----
+      // 쪽: 짧고 높은 '쪽' + 반짝
+      jjok: () => { tone(1500, 0, 0.05, 'sine', 0.28, 3300); noise({ at: 0.035, dur: 0.03, freq: 4200, q: 2, vol: 0.3 }); tone(2350, 0.1, 0.14, 'triangle', 0.12); },
+      // 뻑: 둔하고 김빠지는 '뻐억'
+      ppeok: () => { tone(230, 0, 0.32, 'sawtooth', 0.15, 70); tone(244, 0, 0.32, 'square', 0.07, 74); noise({ dur: 0.2, freq: 320, q: 0.8, vol: 0.55, type: 'lowpass' }); },
+      // 따닥: 연달아 두 번 세게 + 딩동
+      ttadak: () => { slap(true); setTimeout(() => slap(true), 110); [880, 1320].forEach((f, i) => tone(f, 0.24 + i * 0.07, 0.14, 'triangle', 0.16)); },
+      // 싹쓸이: 쓸어 담는 '쏴아' + 올라가는 음
+      sseul: () => { noise({ dur: 0.4, freq: 500, freqTo: 6000, q: 0.7, vol: 0.45, attack: 0.05 }); [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.26 + i * 0.06, 0.16, 'triangle', 0.15)); },
+      // 뻑 먹기 / 자뻑: 가져오는 '쓱' + 두 음
+      grab: () => { noise({ dur: 0.2, freq: 3000, freqTo: 900, q: 1, vol: 0.28 }); [660, 990].forEach((f, i) => tone(f, 0.08 + i * 0.07, 0.14, 'triangle', 0.18)); },
+      // 첫뻑·연뻑·첫따닥 점수
+      points: () => [1047, 1319, 1568, 2093].forEach((f, i) => tone(f, i * 0.06, 0.18, 'square', 0.07)),
+      // 폭탄: 낮게 '쾅'
+      boom: () => { tone(120, 0, 0.5, 'sine', 0.65, 36); noise({ dur: 0.4, freq: 1000, freqTo: 120, q: 0.6, vol: 0.85, type: 'lowpass' }); noise({ dur: 0.025, freq: 2500, q: 0.5, vol: 0.5, type: 'highpass' }); },
+      // 흔들기: 달그락달그락
+      rattle: () => { for (let i = 0; i < 7; i++) noise({ at: i * 0.055, dur: 0.035, freq: 2400 + (i % 2) * 800, q: 1.6, vol: 0.38 }); },
+      // 족보 완성: 빰빠밤
+      yaku: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.08, 0.2, 'triangle', 0.22)); tone(1047, 0.34, 0.5, 'triangle', 0.2); tone(1319, 0.34, 0.5, 'sine', 0.12); },
+      // 고도리: 새소리 + 빰빠밤
+      godori: () => { [2637, 3136, 2637, 3520].forEach((f, i) => tone(f, i * 0.06, 0.06, 'sine', 0.1, f * 1.1)); [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.28 + i * 0.08, 0.2, 'triangle', 0.22)); tone(1047, 0.62, 0.5, 'triangle', 0.2); },
+      // 비상: 삐뽀삐뽀
+      siren: () => [0, 0.24].forEach(t => { tone(880, t, 0.12, 'square', 0.07); tone(660, t + 0.12, 0.12, 'square', 0.07); }),
+      stop: () => [784, 659, 523, 1047].forEach((f, i) => tone(f, i * 0.1, i === 3 ? 0.45 : 0.16, 'triangle', 0.22)),
     };
   })();
 
@@ -402,14 +425,27 @@
 
   const hideFlip = () => $('#flip-show').classList.add('hidden');
 
-  async function flash(text, small, ms) {
+  // '컴퓨터 싹쓸이!' → 작은 '컴퓨터' + 큰 '싹쓸이!' (좁은 화면에서도 한 줄에 들어가게)
+  function whoSplit(el, text) {
+    const m = /^컴퓨터 (.+)$/.exec(text);
+    if (!m) { el.append(text); return; }
+    const w = document.createElement('span');
+    w.className = 'who-tag';
+    w.textContent = '컴퓨터';
+    el.append(w, m[1]);
+  }
+
+  async function flash(text, small, ms, kind) {
     const el = $('#event');
+    el.className = kind ? 'stamp ev-' + kind : '';
     el.innerHTML = '';
-    el.append(text);
+    const box = kind ? document.createElement('div') : el; // 도장: 빛살(뒤) + 배지(앞)
+    if (kind) { box.className = 'stamp-box'; el.appendChild(box); }
+    whoSplit(box, text);
     if (small) {
       const s = document.createElement('small');
       s.textContent = small;
-      el.appendChild(s);
+      box.appendChild(s);
     }
     el.classList.remove('hidden');
     el.style.animation = 'none';
@@ -418,6 +454,57 @@
     el.style.animationDuration = (ms || 1000) + 'ms'; // 보이는 시간만큼 튀어나왔다 사라짐
     await sleep(ms || 1000);
     el.classList.add('hidden');
+  }
+
+  // 판 전체가 '쿵' 하고 흔들림 (폭탄·따닥·싹쓸이)
+  function shakeBoard(strong) {
+    const el = $('#game');
+    if (!el.animate) return;
+    const a = strong ? 7 : 4;
+    el.animate([{ transform: 'translate(0,0)' }, { transform: `translate(${-a}px,${a / 2}px)` }, { transform: `translate(${a}px,${-a / 2}px)` },
+      { transform: `translate(${-a / 2}px,0)` }, { transform: 'translate(0,0)' }], { duration: strong ? 320 : 220, easing: 'ease-out' });
+  }
+  // 가운데에 패 여러 장을 크게 펼쳐 보여 주기 (흔들기·족보 완성·비상)
+  // opt = { title, sub, kind, ms, wobble(흔들림), focus(강조할 패 id), dim(흐리게 할 패 id 목록) }
+  async function showcase(ids, opt) {
+    const box = document.createElement('div');
+    box.className = 'showcase sc-' + opt.kind;
+    const row = document.createElement('div');
+    row.className = 'sc-cards';
+    ids.forEach((id, i) => {
+      const c = cardEl(id);
+      c.classList.remove('ghost');
+      c.style.animationDelay = (i * 70) + 'ms';
+      if (opt.wobble) c.classList.add('wobble');
+      if (opt.focus === id) c.classList.add('focus');
+      row.appendChild(c);
+    });
+    const t = document.createElement('div');
+    t.className = 'sc-title';
+    whoSplit(t, opt.title);
+    box.append(row, t);
+    if (opt.sub) {
+      const sm = document.createElement('div');
+      sm.className = 'sc-sub';
+      sm.textContent = opt.sub;
+      box.appendChild(sm);
+    }
+    document.body.appendChild(box);
+    await sleep(opt.ms || 1100);
+    box.classList.add('out');
+    await sleep(160);
+    box.remove();
+  }
+  // 먹은 패 더미 근처에 잠깐 떠오르는 글자 (피 뺏기)
+  function floatText(rect, text) {
+    if (!rect) return;
+    const el = document.createElement('div');
+    el.className = 'float-text';
+    el.textContent = text;
+    el.style.left = (rect.left + rect.width / 2) + 'px';
+    el.style.top = rect.top + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 900);
   }
 
   // 바닥에서 한 장 고르기 (후보를 펼쳐 반짝이게 하고 누를 때까지 기다림)
@@ -440,6 +527,7 @@
       showModal(Object.assign({}, opts, {
         buttons: opts.buttons.map(b => Object.assign({}, b, { onClick: () => res(b.value) })),
       }));
+      if (opts.onShow) opts.onShow(res);
     });
   }
 
@@ -588,7 +676,8 @@
       render();
       await flyCard(b, from, FX.rectOf(pileEl(p, b)) || pileRect(p), { dur: T.flip + 60, flip: true, pop: 0.4 }, () => sfx.slap());
       if (S !== game) return undefined;
-      await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', '한 장 더 뒤집어요', 650);
+      sfx.points();
+      await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', '한 장 더 뒤집어요', 650, 'points');
       if (S !== game) return undefined;
     }
     if (d === null) return null;
@@ -617,7 +706,9 @@
   async function animSteal(p, res, before) {
     for (const id of res.stolen) {
       sfx.steal();
-      await flyCard(id, before[id], FX.rectOf(pileEl(p, id)), { dur: T.steal, arc: 30 });
+      const to = FX.rectOf(pileEl(p, id));
+      floatText(to, p === 0 ? `피 +${C[id].pi}` : `피 -${C[id].pi}`);
+      await flyCard(id, before[id], to, { dur: T.steal, arc: 30 });
       await sleep(60);
     }
   }
@@ -649,8 +740,8 @@
       FX.remove(el);
     }
     if (S !== game) return;
-    sfx.event();
-    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요') : '한 장 더', 700);
+    sfx.points();
+    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요') : '한 장 더', 700, 'points');
     if (S !== game) return;
     saveGame();
     if (p === 1) { aiTurn(); return; }
@@ -662,6 +753,7 @@
   async function doPlay(id, opt) {
     const game = S;
     const p = S.turn;
+    const capBefore = S.captured[p].slice(); // 족보 완성 알림용
     if (opt.dummy) {
       R.playDummy(S);
       setMsg(p === 0 ? '폭탄패: 뒤집기만 해요' : '컴퓨터 폭탄패: 뒤집기만');
@@ -675,7 +767,9 @@
       const ids = res.bomb ? S.pending.cards.slice() : [id];
       if (opt.shake && S.shake[p] && !res.bomb) {
         render();
-        await flash(p === 0 ? '흔들기!' : '컴퓨터 흔들기!', '이기면 점수 2배', 800);
+        sfx.rattle();
+        await showcase([id, ...S.hands[p].filter(x => same(x, id))],
+          { title: p === 0 ? '흔들기!' : '컴퓨터 흔들기!', sub: '이기면 점수 2배', kind: 'shake', wobble: true, ms: 900 });
         if (S !== game) return;
       }
       setMsg(p === 0 ? '' : '컴퓨터가 패를 냈어요');
@@ -683,6 +777,12 @@
       render();
       await animPlay(p, ids, from, hadMatch);
       if (S !== game) return;
+      if (res.bomb) { // '타-타-탁' 다음 '쾅!'
+        sfx.boom();
+        shakeBoard(true);
+        await flash(p === 0 ? '폭탄!' : '컴퓨터 폭탄!', '이기면 점수 2배', 750, 'bomb');
+        if (S !== game) return;
+      }
       await sleep(70);
     }
 
@@ -717,6 +817,10 @@
       if (S !== game) return;
     }
     hidden.clear();
+    await showYaku(p, capBefore, game);
+    if (S !== game) return;
+    await showAlerts(game);
+    if (S !== game) return;
     R.endTurn(S);
     saveGame();
     render();
@@ -724,10 +828,41 @@
     if (S === game) proceed();
   }
 
+  // 족보 완성: 모은 패를 가운데 크게 + 빰빠밤
+  async function showYaku(p, capBefore, game) {
+    for (const y of R.newYaku(capBefore, S.captured[p])) {
+      (y.key === 'godori' ? sfx.godori : sfx.yaku)();
+      if (y.key !== 'godori' && !y.key.startsWith('gwang')) shakeBoard(false);
+      await showcase(y.ids, { title: (p === 0 ? '' : '컴퓨터 ') + y.name + '!', sub: `+${y.pts}점`, kind: 'yaku', ms: 1200 });
+      if (S !== game) return;
+    }
+  }
+  // 비상: 족보까지 1장 남았을 때 (나·컴퓨터 모두, 족보마다 한 판에 한 번)
+  async function showAlerts(game) {
+    S.alerted = S.alerted || {};
+    for (const q of [S.turn, 1 - S.turn]) {
+      for (const a of R.yakuAlerts(S.captured[q], S.captured[1 - q])) {
+        const key = q + ':' + a.key;
+        if (S.alerted[key]) continue;
+        S.alerted[key] = 1;
+        sfx.siren();
+        await showcase([...a.have, a.missing], {
+          title: (q === 0 ? '' : '컴퓨터 ') + a.name + ' 비상!',
+          sub: q === 0 ? `이 패만 더 먹으면 +${a.pts}점!` : '이 패를 먼저 가져오세요!',
+          kind: 'alert', focus: a.missing, ms: 1300,
+        });
+        if (S !== game) return;
+      }
+    }
+  }
+
+  // [글자, 작은 글자, 도장 모양, 소리, 판 흔들림]
   const EVENT_TEXT = {
-    jjok: ['쪽!'], ppeok: ['뻑!'], ttadak: ['따닥!'], sseul: ['싹쓸이!'], ppeokTake: ['뻑 먹기!'], jappeok: ['자뻑!'],
-    bomb: ['폭탄!'], firstPpeok: ['첫뻑!', '+7점'], yeonPpeok: ['연뻑!', '+14점'],
-    samyeonPpeok: ['삼연뻑!', '바로 이겨요'], firstTtadak: ['첫따닥!', '+7점'],
+    jjok: ['쪽!', '', 'jjok', 'jjok'], ppeok: ['뻑!', '', 'ppeok', 'ppeok'],
+    ttadak: ['따닥!', '', 'ttadak', 'ttadak', 1], sseul: ['싹쓸이!', '', 'sseul', 'sseul', 2],
+    ppeokTake: ['뻑 먹기!', '', 'grab', 'grab'], jappeok: ['자뻑!', '', 'grab', 'grab'],
+    firstPpeok: ['첫뻑!', '+7점', 'points', 'points'], yeonPpeok: ['연뻑!', '+14점', 'points', 'points'],
+    samyeonPpeok: ['삼연뻑!', '바로 이겨요', 'points', 'points', 2], firstTtadak: ['첫따닥!', '+7점', 'points', 'points'],
   };
   // 쪽·뻑·따닥 등: 패가 바닥에 놓인 채로 알림 (먹는 연출은 그다음)
   async function showEvents(res) {
@@ -735,16 +870,13 @@
     const stolenMsg = res.stolen.length ? (mine ? `상대 피 ${res.stolen.length}장 가져옴` : `피 ${res.stolen.length}장 뺏겼어요`) : '';
     const evs = res.events.filter(e => EVENT_TEXT[e]);
     if (!evs.length) return;
-    sfx.event();
     for (let i = 0; i < evs.length; i++) {
-      const [t, sub] = EVENT_TEXT[evs[i]];
+      const [t, sub, kind, sound, shake] = EVENT_TEXT[evs[i]];
       const last = i === evs.length - 1;
-      await flash((mine ? '' : '컴퓨터 ') + t, [sub, last ? stolenMsg : ''].filter(Boolean).join(' · '), 750);
+      sfx[sound]();
+      if (shake) shakeBoard(shake > 1);
+      await flash((mine ? '' : '컴퓨터 ') + t, [sub, last ? stolenMsg : ''].filter(Boolean).join(' · '), 750, kind);
     }
-  }
-
-  function showModalCards(title, ids) {
-    showModal({ title, node: showCards(ids), buttons: [] });
   }
 
   async function aiTurn() {
@@ -757,12 +889,6 @@
     const a = R.aiPick(S);
     if (a.dummy) return doPlay(null, { dummy: true });
     if (R.isBonus(a.card)) return doBonus(a.card);
-    if (a.bomb) {
-      showModalCards('💣 컴퓨터 폭탄!', S.hands[1].filter(x => C[x].month === C[a.card].month));
-      await sleep(900);
-      hideModal();
-      if (S !== game) return;
-    }
     await doPlay(a.card, a);
   }
 
@@ -774,22 +900,51 @@
     render();
     let go;
     if (p === 0) {
-      go = await ask({
-        emoji: '🎴', title: `${sc}점 났어요!`,
-        html: '<b>고</b>: 계속해서 점수를 더 내요.<br>대신 컴퓨터가 먼저 나면 2배로 잃어요(고박).<br><b>스톱</b>: 여기서 끝내고 점수를 받아요.',
-        row: true,
-        buttons: [{ label: '고!', value: true }, { label: '스톱', cls: 'stop', value: false }],
-      });
+      sfx.yaku();
+      for (;;) {
+        const next = S.go[0] + 1;
+        const v = await ask({
+          emoji: '🎴', title: `${sc}점 났어요!`,
+          html: (S.go[0] ? `지금 <b>${S.go[0]}고</b> 중이에요.<br>` : '') +
+            `<b>고</b>: 계속해서 점수를 더 내요 (${next}고 → +${next}점${next >= 3 ? ', 점수 ' + 2 ** (next - 2) + '배' : ''}).<br>` +
+            '대신 컴퓨터가 먼저 나면 2배로 잃어요(고박).<br><b>스톱</b>: 여기서 끝내고 점수를 받아요.' +
+            '<div class="look-row"><button type="button" class="look-btn">👀 판 보기</button></div>',
+          row: true,
+          buttons: [{ label: `${next}고!`, value: true }, { label: '스톱', cls: 'stop', value: false }],
+          onShow: (resolve) => { overlay.querySelector('.look-btn').onclick = () => { hideModal(); resolve('look'); }; },
+        });
+        if (S !== game) return;
+        if (v !== 'look') { go = v; break; }
+        await lookBoard(); // 판을 보다가 '고/스톱 고르기'를 누르면 다시 창
+        if (S !== game) return;
+      }
     } else {
       await sleep(400);
       go = R.aiGoStop(S);
     }
     if (S !== game) return;
     R.decide(S, go);
-    if (go) { sfx.go(); await flash(p === 0 ? `${S.go[0]}고!` : `컴퓨터 ${S.go[1]}고!`, p === 0 ? '계속합니다' : '조심하세요!'); }
-    else await flash(p === 0 ? '스톱!' : '컴퓨터 스톱!');
+    if (go) {
+      sfx.go();
+      await flash(p === 0 ? `${S.go[0]}고!` : `컴퓨터 ${S.go[1]}고!`, p === 0 ? '계속합니다' : '조심하세요!', 850, 'go');
+    } else {
+      sfx.stop();
+      await flash(p === 0 ? '스톱!' : '컴퓨터 스톱!', '', 850, 'stop');
+    }
     saveGame();
     if (S === game) proceed();
+  }
+
+  // 고/스톱 중 '판 보기': 창을 잠시 내리고 아래 버튼으로 다시 열기 (먹은 패 누르면 자세히 보기 가능)
+  function lookBoard() {
+    return new Promise(res => {
+      const bar = document.createElement('button');
+      bar.type = 'button';
+      bar.className = 'look-bar btn';
+      bar.textContent = '고 / 스톱 고르기 ▲';
+      bar.onclick = () => { bar.remove(); res(); };
+      document.body.appendChild(bar);
+    });
   }
 
   function showResult() {
@@ -918,6 +1073,7 @@
     FX.clear();
     hidden.clear();
     resetView();
+    document.querySelectorAll('.showcase, .float-text, .look-bar').forEach(el => el.remove());
     $('#event').classList.add('hidden');
   }
   function goHome() {

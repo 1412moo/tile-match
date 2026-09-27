@@ -400,6 +400,37 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   for (const e of ['jjok', 'ppeok', 'ttadak', 'sseul', 'ppeokTake', 'bomb', 'bonus', 'bonusFlip', 'firstPpeok']) if (!seen[e]) fail(`3000판 동안 '${e}' 가 한 번도 없음`);
 }
 
+// 7-2) 고스톱 족보 완성 / 비상 판정 (화면 연출용, 점수 계산과 일치해야 함)
+{
+  console.log('[7-2] 고스톱 족보 완성 / 비상 판정');
+  const Y = k => GS.YAKU.find(y => y.key === k);
+  const names = a => a.map(y => y.name).join(',');
+  // 3장 족보가 score() 와 같은 카드로 정의되어 있는지
+  for (const y of GS.YAKU) {
+    const sc = GS.score(y.ids, false);
+    const pts = y.key === 'godori' ? sc.godori : sc[y.key];
+    if (pts !== y.pts) fail(`${y.name} 카드 정의가 점수 계산과 다름 (${pts})`);
+  }
+  // 비상: 2장 모음 + 남은 1장을 상대가 안 먹음
+  const god = Y('godori').ids, cheong = Y('cheong').ids;
+  let a = GS.yakuAlerts([god[0], god[1], 2], []);
+  if (names(a) !== '고도리' || a[0].missing !== god[2]) fail(`고도리 비상 ${JSON.stringify(a)}`);
+  if (GS.yakuAlerts([god[0], god[1]], [god[2]]).length) fail('남은 패를 상대가 먹었는데 비상');
+  if (GS.yakuAlerts([god[0]], []).length) fail('1장만 있는데 비상');
+  if (GS.yakuAlerts(god.slice(), []).length) fail('이미 완성했는데 비상');
+  a = GS.yakuAlerts([god[0], god[1], cheong[0], cheong[2]], []);
+  if (names(a) !== '고도리,청단') fail(`비상 둘 동시 ${names(a)}`);
+  // 새로 완성된 족보
+  if (names(GS.newYaku([god[0], god[1]], god.slice())) !== '고도리') fail('고도리 완성 감지');
+  if (GS.newYaku(god.slice(), god.concat([2])).length) fail('이미 완성된 족보를 또 알림');
+  const gw = GC.filter(c => c.kind === 'gwang' && !c.rain).map(c => c.id), rain = GC.find(c => c.rain).id;
+  if (names(GS.newYaku(gw.slice(0, 2), gw.slice(0, 3))) !== '삼광') fail('삼광 감지');
+  if (names(GS.newYaku(gw.slice(0, 2), [gw[0], gw[1], rain])) !== '비삼광') fail('비삼광 감지');
+  if (names(GS.newYaku(gw.slice(0, 3), gw.slice(0, 4))) !== '사광') fail('사광 감지');
+  if (names(GS.newYaku(gw.slice(0, 4), gw.concat([rain]))) !== '오광') fail('오광 감지');
+  if (GS.newYaku([gw[0]], [gw[0], rain]).length) fail('광 2장에 알림');
+}
+
 // 8) 수박게임: 물리 / 합체 / 점수 / 게임오버 / 저장
 {
   console.log('[8] 수박게임 물리 / 합체 / 점수 / 위험선 / 저장');
