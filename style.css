@@ -210,3 +210,5 @@ h1 { margin: 0; font-size: 44px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
   #stage-grid { grid-template-columns: repeat(5, 1fr); gap: 8px; }
   .stage { font-size: 22px; }
 }
+
+.version { margin: 4px 0 0; font-size: 13px; opacity: .55; }

@@ -3,6 +3,7 @@
 
   const { EMOJIS, generateLevel, levelParams, overlaps, solvableShuffle } = window.TM_Levels;
 
+  const APP_VERSION = 4; // sw.js 의 VERSION 과 같게 유지
   const SLOT_SIZE = 7;
   const BOOSTER_START = { undo: 3, shuffle: 2, hint: 3 }; // 레벨마다 다시 채워짐
   const SAVE_KEY = 'tilematch.save.v1';
@@ -542,6 +543,7 @@
     if (document.visibilityState === 'hidden' && G && !G.busy) saveProgress();
   });
 
+  $('#app-version').textContent = `버전 ${APP_VERSION}`;
   showHome();
 
   // 오프라인 실행을 위한 서비스 워커 (http(s)로 열었을 때만)

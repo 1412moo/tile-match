@@ -51,6 +51,16 @@ for (const f of ['game.js', 'sw.js']) {
   catch (e) { fail(`${f}: ${e.message}`); }
 }
 
+{
+  const read = f => require('fs').readFileSync(require('path').join(__dirname, '..', f), 'utf8');
+  const appV = (read('game.js').match(/APP_VERSION = (\d+)/) || [])[1];
+  const swV = (read('sw.js').match(/const VERSION = (\d+)/) || [])[1];
+  if (!appV || appV !== swV) fail(`버전 불일치: game.js APP_VERSION=${appV}, sw.js VERSION=${swV}`);
+  // index.html 의 파일 주소에 붙은 ?v= 도 같은 버전이어야 새 버전이 캐시에 가려지지 않는다
+  const tags = read('index.html').match(/\?v=\d+/g) || [];
+  if (tags.length !== 3 || tags.some(t => t !== `?v=${swV}`)) fail(`index.html 버전 태그 불일치: ${tags.join(',')} (sw.js VERSION=${swV})`);
+}
+
 // 1) 레벨 무결성
 console.log('[1] 레벨 1~100 생성 / 3의 배수 / 결정성');
 for (let lv = 1; lv <= 100; lv++) {
