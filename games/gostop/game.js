@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 15; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 16; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -375,6 +375,8 @@
     $('#my-badges').innerHTML = badgesHTML(0);
     $('#opp-pts').textContent = `${R.bestScore(S.captured[1]).total}점`;
     $('#my-pts').textContent = `${R.bestScore(S.captured[0]).total}점`;
+    const st = save.stats;
+    $('#my-record').textContent = st.wins + st.losses + st.draws ? recordText() : '첫 판';
     $('#opp-side').classList.toggle('turn', S.turn === 1 && S.phase !== 'over');
     $('#me-side').classList.toggle('turn', S.turn === 0 && S.phase !== 'over');
     const mult = $('#round-mult');
@@ -385,6 +387,12 @@
     renderPiles($('#my-piles'), S.captured[0].concat(view.capAdd[0]));
     renderHand();
     layoutFloor(); // 손패 높이가 정해진 뒤에 바닥 크기를 잰다
+  }
+
+  // 전적: '3승 2패 1무 · +12점' (첫 화면은 '누적' 을 붙임)
+  function recordText(pre) {
+    const st = save.stats;
+    return `${st.wins}승 ${st.losses}패${st.draws ? ` ${st.draws}무` : ''} · ${pre || ''}${st.points >= 0 ? '+' : ''}${st.points}점`;
   }
 
   function renderHand() {
@@ -1068,9 +1076,7 @@
     $('#btn-continue').classList.toggle('hidden', !save.current);
     $('#btn-new').className = save.current ? 'btn light' : 'btn big'; // 하던 판이 없으면 '새 판 시작'이 주 버튼
     const st = save.stats, games = st.wins + st.losses + st.draws;
-    $('#record').textContent = games
-      ? `${st.wins}승 ${st.losses}패${st.draws ? ` ${st.draws}무` : ''} · 누적 ${st.points >= 0 ? '+' : ''}${st.points}점`
-      : '';
+    $('#record').textContent = games ? recordText('누적 ') : '';
     updateSoundButtons();
   }
 
