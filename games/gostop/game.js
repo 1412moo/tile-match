@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 17; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 18; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -1251,6 +1251,10 @@
   });
 
   $('#deck .hw').style.backgroundImage = ART.back(); // 가운데 더미는 뒷면
+  // 화투 그림 48장을 미리 불러 둔다: 처음 나오는 패(뒤집은 패·상대 패)의 그림을 날아가는 도중에
+  // 받느라 잠깐 투명하게 보이지 않도록 (서비스 워커가 네트워크 먼저라 휴대폰에서는 느릴 수 있음)
+  const preloaded = ART.files().map(u => { const img = new Image(); img.src = u; if (img.decode) img.decode().catch(() => { }); return img; });
+  window.__gsPreloaded = preloaded; // 참조를 잡아 두어 메모리 캐시에서 빠지지 않게
   // 첫 화면 장식 (1월 광, 8월 광, 3월 광)
   [0, 28, 8].forEach(id => $('#logo').appendChild(cardEl(id)));
   $('#app-version').textContent = `버전 ${APP_VERSION}`;

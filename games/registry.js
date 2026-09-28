@@ -8,7 +8,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 17;
+  root.APP_VERSION = 18;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -61,6 +61,17 @@
       storageKey: 'watermelon.save.v1',
       files: ['', 'index.html', 'style.css', 'physics.js', 'core.js', 'art.js', 'game.js'],
       summary: s => (s.current ? `하던 판 ${(s.current.score | 0).toLocaleString('ko-KR')}점` : s.best ? `최고 ${s.best.toLocaleString('ko-KR')}점` : ''),
+    },
+    {
+      id: 'match-3',
+      name: '보석 맞추기',
+      icon: '💎',
+      desc: '같은 보석 3개를 한 줄로 맞추기',
+      path: 'games/match-3/',
+      ready: true,
+      storageKey: 'match-3.save.v1',
+      files: ['', 'index.html', 'style.css', 'logic.js', 'game.js'],
+      summary: s => (s.current ? `남은 ${s.current.moves}번 · ${(s.current.score | 0).toLocaleString('ko-KR')}점` : s.best ? `최고 ${s.best.toLocaleString('ko-KR')}점` : ''),
     },
   ];
 })(typeof self !== 'undefined' ? self : this);

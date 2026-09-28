@@ -713,5 +713,166 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   }
 }
 
+// 9) 보석 맞추기 (매치-3)
+{
+  console.log('[9] 보석 맞추기: 시작 판 / 맞춤 / 특수 보석 / 연쇄 / 움직일 수 없는 판 / 저장');
+  const M = require('../games/match-3/logic.js');
+  const N = M.N;
+  const mkRng = sd => () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  const ids = b => b.flat().map(x => x && x.id);
+  const full = b => b.every(row => row.length === N && row.every(x => x && x.c >= -1 && x.c < M.COLORS));
+  // 원하는 판 만들기: 기본 무늬 (2r+c)%6 (맞춤도 움직일 수도 없음) 위에 칸을 덮어씀. set: [[r,c,색,특수]]
+  function mkState(set, base = (r, c) => (2 * r + c) % 6) {
+    let seq = 1;
+    const board = Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, c) => ({ id: seq++, c: base(r, c), s: null })));
+    for (const [r, c, col, sp] of set) board[r][c] = { id: seq++, c: col, s: sp || null };
+    return { v: 1, seq, board, score: 0, moves: M.MOVES, over: false, bestCombo: 0 };
+  }
+  const X = 5; // 7번 줄 (7,3) 의 기본 색과 같아서 가로 4·5·ㄱ 모양에 씀
+  const Y = 0; // 기본 무늬와 이어지지 않는 색 (정확히 3개짜리 판)
+  const firstClear = res => res.steps.find(t => t.kind === 'clear');
+
+  // (a) 시작 판: 이미 맞은 줄 없음, 움직일 수 있는 수 있음 (2000판)
+  {
+    const rng = mkRng(3);
+    for (let g = 0; g < 2000; g++) {
+      const st = M.createGame(rng);
+      if (M.findRuns(st.board).length) { fail(`시작 판에 이미 3개가 맞아 있음 (판 ${g})`); break; }
+      if (!M.findMove(st.board)) { fail(`시작 판에 움직일 수가 없음 (판 ${g})`); break; }
+      if (!full(st.board) || new Set(ids(st.board)).size !== N * N || st.moves !== M.MOVES) { fail('시작 판 구성 이상'); break; }
+    }
+  }
+  // (b) 기본 무늬 확인: 맞춤 없음 + 움직일 수 없음
+  {
+    const st = mkState([]);
+    if (M.findRuns(st.board).length || M.findMove(st.board)) fail('테스트용 기본 무늬가 잘못됨');
+  }
+  // (c) 3개 맞춤: 바꾸면 지워지고, 판이 다시 가득 차고, 맞은 줄이 남지 않음
+  {
+    const st = mkState([[7, 0, Y], [7, 1, Y], [6, 2, Y]]);
+    if (M.findRuns(st.board).length) fail('(c) 준비 판에 이미 맞춤');
+    const res = M.play(st, { r: 6, c: 2 }, { r: 7, c: 2 }, mkRng(1));
+    const cl = res.ok && firstClear(res);
+    if (!cl || cl.cleared.length !== 3 || cl.points !== 3 * M.CELL_PTS || cl.combo !== 1) fail(`3개 맞춤 ${JSON.stringify(cl && { n: cl.cleared.length, p: cl.points })}`);
+    if (!full(st.board) || M.findRuns(st.board).length || new Set(ids(st.board)).size !== N * N) fail('3개 맞춤 뒤 판 상태 이상');
+    if (st.moves !== M.MOVES - 1) fail('움직인 횟수가 줄지 않음');
+    // 낙하: 지운 줄 위의 보석이 내려오고 모자란 만큼 위에서 새로 생김
+    const fall = res.steps.find(t => t.kind === 'fall');
+    if (!fall || fall.spawns.length !== 3 || fall.moves.some(m => m.r <= m.fromR) || fall.spawns.some(sp => sp.fromR >= 0)) fail('낙하 기록 이상');
+  }
+  // (d) 맞춤이 안 생기는 바꾸기는 되돌림 (판·점수·횟수 그대로)
+  {
+    const st = mkState([[7, 0, Y], [7, 1, Y], [6, 2, Y]]);
+    const before = JSON.stringify(st.board);
+    const res = M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, mkRng(1));
+    if (res.ok || JSON.stringify(st.board) !== before || st.moves !== M.MOVES || st.score) fail('맞지 않는 바꾸기를 되돌리지 않음');
+    if (M.play(st, { r: 0, c: 0 }, { r: 2, c: 0 }, mkRng(1)).ok) fail('붙어 있지 않은 칸끼리 바뀜');
+  }
+  // (e) 특수 보석 만들기: 가로 4 → 가로줄, 세로 4 → 세로줄, 5 → 무지개, ㄱ 모양 → 폭탄 (바꾼 자리에 생김)
+  {
+    const cases = [
+      ['가로 4', [[7, 0, X], [7, 1, X], [7, 3, X], [6, 2, X]], [6, 2], [7, 2], 'row'],
+      ['세로 4', [[0, 7, Y], [1, 7, Y], [3, 7, Y], [2, 6, Y]], [2, 6], [2, 7], 'col'],
+      ['5개', [[7, 0, X], [7, 1, X], [7, 3, X], [7, 4, X], [6, 2, X]], [6, 2], [7, 2], 'rainbow'],
+      ['ㄱ 모양', [[7, 0, X], [7, 1, X], [6, 2, X], [5, 2, X], [7, 3, X]], [7, 3], [7, 2], 'bomb'],
+    ];
+    for (const [name, set, a, b, want] of cases) {
+      const st = mkState(set);
+      if (M.findRuns(st.board).length) { fail(`${name}: 준비 판에 이미 맞춤`); continue; }
+      const res = M.play(st, { r: a[0], c: a[1] }, { r: b[0], c: b[1] }, mkRng(2));
+      const cl = res.ok && firstClear(res);
+      const sp = cl && cl.specials[0];
+      if (!sp || sp.s !== want || sp.r !== b[0] || sp.c !== b[1]) fail(`${name} → ${want} 특수 보석 ${JSON.stringify(sp)}`);
+      else if (cl.points !== cl.cleared.length * M.CELL_PTS + M.SPECIAL_PTS[want]) fail(`${name} 점수 ${cl.points}`);
+    }
+  }
+  // (f) 특수 보석 터뜨리기: 가로줄 보석이 맞춤에 끼면 그 줄 전체, 폭탄은 3×3
+  {
+    const st = mkState([[7, 0, Y], [7, 1, Y, 'row'], [6, 2, Y]]);
+    const cl = firstClear(M.play(st, { r: 6, c: 2 }, { r: 7, c: 2 }, mkRng(3)));
+    const row7 = cl && cl.cleared.filter(x => x.r === 7).length;
+    if (!cl || row7 !== N || !cl.triggered.some(t => t.s === 'row')) fail(`가로줄 보석: 7번 줄 ${row7}칸 지움`);
+    const b2 = mkState([[7, 0, Y], [7, 1, Y, 'bomb'], [6, 2, Y]]);
+    const cl2 = firstClear(M.play(b2, { r: 6, c: 2 }, { r: 7, c: 2 }, mkRng(3)));
+    const want = [];
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if (7 + dr < N) want.push((7 + dr) * N + 1 + dc);
+    if (!cl2 || want.some(k => !cl2.cleared.some(x => x.r * N + x.c === k))) fail('폭탄 보석: 3×3 을 다 지우지 않음');
+  }
+  // (g) 무지개 보석: 바꾼 보석과 같은 색을 모두 지움
+  {
+    const st = mkState([[4, 4, -1, 'rainbow']]);
+    const col = st.board[4][5].c;
+    const n = st.board.flat().filter(x => x.s !== 'rainbow' && x.c === col).length;
+    const res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(4));
+    const cl = res.ok && firstClear(res);
+    if (!cl || cl.cleared.length !== n + 1 || cl.cleared.some(x => x.s !== 'rainbow' && x.color !== col)) fail(`무지개: ${cl && cl.cleared.length} 칸 (기대 ${n + 1})`);
+    if (!full(st.board) || M.findRuns(st.board).length) fail('무지개 뒤 판 상태 이상');
+  }
+  // (h) 움직일 수 없는 판: 섞으면 맞춤 없이 움직일 수 있게, 보석(특수 포함)은 그대로
+  {
+    for (const base of [(r, c) => (2 * r + c) % 6, (r, c) => (3 * r + c) % 6, (r, c) => (r + 2 * c) % 6]) {
+      const st = mkState([], base);
+      st.board[3][3].s = 'bomb'; // 색은 그대로 두고 특수 보석으로
+      if (M.findMove(st.board)) { fail('섞기 테스트 판에 움직일 수가 있음'); continue; }
+      const before = ids(st.board).sort((a, b) => a - b).join();
+      const step = M.shuffle(st, mkRng(5));
+      if (step.kind !== 'shuffle' || M.findRuns(st.board).length || !M.findMove(st.board)) fail('섞은 판이 잘못됨');
+      if (!step.fresh && ids(st.board).sort((a, b) => a - b).join() !== before) fail('섞으면서 보석이 바뀜');
+      if (!step.fresh && !st.board.flat().some(x => x.s === 'bomb')) fail('섞으면서 특수 보석이 사라짐');
+    }
+    // 저장된 판이 움직일 수 없는 판이면 이어할 때 섞음
+    const r = M.restore(JSON.parse(JSON.stringify(mkState([]))), mkRng(6));
+    if (!M.findMove(r.board) || M.findRuns(r.board).length) fail('움직일 수 없는 저장 판을 이어할 때 섞지 않음');
+  }
+  // (i) 자동으로 여러 판: 매 수마다 판 가득·맞춤 없음·보석 id 중복 없음·점수 계산·연쇄·끝
+  {
+    const rng = mkRng(11);
+    let plays = 0, combos = 0, shuffles = 0, broken = 0;
+    const kinds = new Set();
+    for (let g = 0; g < 400 && broken < 3; g++) {
+      const st = M.createGame(rng);
+      let guard = 0;
+      while (!st.over && guard++ < 100) {
+        const mv = M.findMove(st.board);
+        if (!mv) { broken++; fail('끝나지 않았는데 움직일 수가 없음'); break; }
+        const score0 = st.score, res = M.play(st, mv[0], mv[1], rng);
+        if (!res.ok) { broken++; fail('findMove 가 준 수가 안 됨'); break; }
+        plays++;
+        let sum = 0;
+        for (const t of res.steps) {
+          if (t.kind === 'shuffle') shuffles++;
+          if (t.kind !== 'clear') continue;
+          if (t.combo >= 2) combos++;
+          t.specials.forEach(x => kinds.add(x.s));
+          const want = t.cleared.length * M.CELL_PTS * t.combo + t.specials.reduce((a, x) => a + M.SPECIAL_PTS[x.s], 0);
+          if (t.points !== want) { broken++; fail(`점수 계산 ${t.points} ≠ ${want}`); }
+          sum += t.points;
+        }
+        if (st.score !== score0 + sum) { broken++; fail('판 점수가 단계 점수 합과 다름'); }
+        if (!full(st.board) || M.findRuns(st.board).length || new Set(ids(st.board)).size !== N * N) { broken++; fail('수를 둔 뒤 판 상태 이상'); break; }
+      }
+      if (!st.over || st.moves !== 0) { broken++; fail('20번 움직인 뒤 판이 끝나지 않음'); }
+      if (M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, rng).ok) { broken++; fail('끝난 판에서 움직여짐'); }
+    }
+    console.log(`  자동 ${plays}수: 연쇄(2단계 이상) ${combos}번, 특수 보석 ${[...kinds].sort().join(',')}, 섞기 ${shuffles}번`);
+    if (!combos) fail('연쇄가 한 번도 없음');
+    for (const k of ['row', 'col', 'bomb', 'rainbow']) if (!kinds.has(k)) fail(`특수 보석 ${k} 가 한 번도 안 생김`);
+  }
+  // (j) 저장: JSON 으로 저장했다가 이어하면 같은 판, 망가진 저장은 새 판
+  {
+    const rng = mkRng(21);
+    const st = M.createGame(rng);
+    for (let i = 0; i < 5; i++) { const mv = M.findMove(st.board); M.play(st, mv[0], mv[1], rng); }
+    const r = M.restore(JSON.parse(JSON.stringify(st)), rng);
+    if (JSON.stringify(r.board) !== JSON.stringify(st.board) || r.score !== st.score || r.moves !== st.moves) fail('이어하기 판이 저장과 다름');
+    const mv = M.findMove(r.board);
+    if (!mv || !M.play(r, mv[0], mv[1], rng).ok || new Set(ids(r.board)).size !== N * N) fail('이어한 판에서 계속 둘 수 없음 (보석 id 중복 포함)');
+    for (const bad of [null, {}, { board: [[1]] }, { board: 'x' }]) {
+      const b = M.restore(bad, rng);
+      if (!full(b.board) || M.findRuns(b.board).length || !M.findMove(b.board) || b.moves !== M.MOVES) fail('망가진 저장에서 새 판을 못 만듦');
+    }
+  }
+}
+
 console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
 process.exit(failures ? 1 : 0);

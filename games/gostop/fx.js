@@ -93,7 +93,13 @@
     return Promise.race([anim.finished.catch(() => null), timeout]).then(() => el);
   }
 
-  function remove(el) { if (el && el.parentNode) el.parentNode.removeChild(el); }
+  // 복사본 치우기: 진짜 카드가 화면에 그려진 다음 프레임에 치운다 (같은 순간에 치우면 둘 다 안 보이는 프레임이 생길 수 있음)
+  function remove(el) {
+    if (!el) return;
+    const gone = () => { if (el.parentNode) el.parentNode.removeChild(el); };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(gone));
+    setTimeout(gone, 100); // 화면이 가려져 프레임이 멈춰도 쌓이지 않게
+  }
   function clear() { if (layer) layer.innerHTML = ''; }
 
   // 도착한 카드에 '착' 하고 내려앉는 느낌 (살짝 눌렸다 돌아옴)

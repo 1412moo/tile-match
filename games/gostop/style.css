@@ -231,7 +231,8 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
   box-shadow: 0 2px 4px rgba(0, 0, 0, .5), 0 8px 16px rgba(0, 0, 0, .35);
 }
 .fx-card .back { transform: rotateY(180deg); }
-.hw.ghost { visibility: hidden; }
+/* 날아오는 중인 진짜 카드: visibility:hidden 이면 그려 두지 않아 드러낼 때 한 프레임 비는 수가 있어 opacity 로 숨김 */
+.hw.ghost { opacity: 0; pointer-events: none; }
 
 /* ---------- 상황 도장 (쪽·뻑·따닥·싹쓸이·폭탄·고·스톱 …) ---------- */
 #event.stamp {
