@@ -490,10 +490,77 @@
     return { card: best, choice: opts ? bestCard(opts) : null, shake: true, bomb: canBomb(s, best) };
   }
 
-  // 고/스톱: 패가 넉넉하고 상대 점수가 낮으면 한두 번은 고
+  // 고/스톱: 지금 스톱하면 받을 점수와, 고를 했을 때의 기대 점수를 비교한다 (난수 없이 판 상황만으로 판단)
+  //   - 스톱 점수: 실제 정산(finish)을 복사본에 돌려 정확히 계산 (피박·광박·멍따·고박·흔들기·배수 모두 반영)
+  //   - 고 기대값: 고 한 뒤 남은 차례를 번갈아 따져 본 '누가 먼저 점수를 내나' 경주
+  //       내가 먼저 더 내면 → (점수 + 고 1번 더, 3고부터 2배씩)으로 스톱
+  //       상대가 먼저 나면 → 상대 점수 × 고박 2배를 물어줌
+  //       아무도 못 내고 패가 떨어지면 → 나가리 (0점)
+  //   공개된 정보(양쪽 먹은 패, 남은 장수, 점수)만 쓰고 더미·상대 손패는 보지 않는다.
+  //   차례당 점수가 오를 확률·오를 때 평균 점수는 컴퓨터끼리 2만 판을 돌려 잰 값
+  //   (0점 17% · 1~4점 64% · 5점 이상 74%, 오르면 평균 약 2.7점).
+  const GAIN = [[5, 0.74], [1, 0.64], [0, 0.17]];                 // [이 점수 이상이면, 한 차례에 점수가 오를 확률]
+  const GAIN_SIZE = [[1, 0.4], [2, 0.25], [3, 0.15], [5, 0.2]];   // 오를 때 몇 점 오르나 (평균 약 2.7)
+  function gainChance(mine, theirs) {
+    const sc = bestScore(mine);
+    let q = GAIN.find(([min]) => sc.total >= min)[1];
+    if (sc.total >= 5 && sc.piCount < 8) q = 0.45;                  // 피가 적으면 한 장씩 오르는 점수가 없음
+    q += 0.04 * yakuAlerts(mine, theirs).length;                   // 1장 남은 족보가 있으면 조금 더
+    return Math.min(0.85, q);
+  }
+  // 고 횟수(k)별: 고 기대값이 스톱 점수의 몇 배 이상이어야 하는지 / 상대에게 역전당할 확률 한도
+  // (컴퓨터끼리·사람 흉내와 각 2만 판 시뮬레이션으로 정함: 3고 이상은 이긴 판의 약 5%)
+  const GO_MARGIN = [1.15, 1.25, 2.3, 2.4];
+  const GO_RISK = [0.25, 0.15, 0.04, 0.02];
   function aiGoStop(s) {
     const p = s.turn, o = 1 - p;
-    return handsLeft(s, p) >= 3 && bestScore(s.captured[o]).total <= 3 && s.go[p] < 2;
+    let myLeft = handsLeft(s, p), oppLeft = handsLeft(s, o);
+    if (myLeft === 0) return false;
+    // 지금 스톱하면 받는 점수 (실제 정산)
+    const probe = JSON.parse(JSON.stringify(s));
+    finish(probe, p);
+    const stopPts = probe.over.points;
+    const my = bestScore(s.captured[p]), k = s.go[p];
+    const goMult = n => (n >= 3 ? 2 ** (n - 2) : 1);
+    const other = stopPts / ((my.total + k) * goMult(k));          // 흔들기·피박·광박·멍따·고박·나가리 배수
+    const a = gainChance(s.captured[p], s.captured[o]);
+    const b = gainChance(s.captured[o], s.captured[p]);
+    const avgGain = GAIN_SIZE.reduce((m, [g, w]) => m + g * w, 0);
+    // 내가 다시 내면 받을 점수: 평균만큼 더 오르고 고 1번 더 (3고부터 2배씩)
+    const nextPts = (my.total + avgGain + k + 1) * goMult(k + 1) * other;
+    // 상대가 나면 물어줄 점수: 상대가 날 때 점수(대략 목표 +1) × 고박 2배 × 나가리 배수, 내 피가 적으면 피박 위험 반영
+    const oppSc = bestScore(s.captured[o]).total;
+    const target = s.go[o] ? s.goScore[o] + 1 : WIN_SCORE;
+    const lossPts = (Math.max(target, oppSc) + 1) * 2 * (s.mult || 1) * (my.piCount <= 7 ? 1.5 : 1);
+    // 경주: 고 다음은 상대 차례부터. need[r] = 상대가 목표까지 r점 남은 확률(아직 끝나지 않은 판)
+    const need0 = Math.max(0, target - oppSc);
+    let alive = new Array(need0 + 1).fill(0);
+    let pWin = 0, pLose = 0;
+    if (need0 === 0) pLose = b; else alive[need0] = 1;               // 이미 목표 점수면 한 번만 더 내도 남
+    while ((myLeft > 0 || oppLeft > 0) && alive.some(x => x > 1e-9)) {
+      if (oppLeft > 0) {
+        oppLeft--;
+        const next = new Array(need0 + 1).fill(0);
+        alive.forEach((m, r) => {
+          if (!m) return;
+          next[r] += m * (1 - b);
+          for (const [g, w] of GAIN_SIZE) { if (r - g <= 0) pLose += m * b * w; else next[r - g] += m * b * w; }
+        });
+        alive = next;
+      }
+      if (myLeft > 0) {
+        myLeft--;
+        const total = alive.reduce((x, y) => x + y, 0);
+        pWin += total * a;
+        alive = alive.map(m => m * (1 - a));
+      }
+    }
+    const goValue = pWin * nextPts - pLose * lossPts;                // 남은 확률은 나가리(0점)
+    // 사람처럼 가진 게 많을수록 조심: 고를 거듭할수록 더 큰 기대값과 더 낮은 역전 위험을 요구
+    //   (1고·2고는 기대값이 스톱보다 15~25% 커야, 3고부터는 배수가 붙는 만큼 2배 이상 + 질 위험 4% 이하)
+    const margin = GO_MARGIN[Math.min(k, GO_MARGIN.length - 1)];
+    const maxRisk = GO_RISK[Math.min(k, GO_RISK.length - 1)];
+    return goValue > stopPts * margin && pLose <= maxRisk;
   }
 
   const api = {

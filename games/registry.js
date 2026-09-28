@@ -1,13 +1,14 @@
 // 게임 목록 (메인 화면과 서비스 워커가 함께 읽는다)
 // 새 게임 추가: games/<id>/ 폴더를 만들고 여기에 항목 하나를 추가한다.
 //   - ready: false 이면 메인 화면에 '준비중'으로 표시되고 들어갈 수 없다.
+//   - hidden: true 이면 메인 화면 목록에 아예 보이지 않는다 (만드는 중인 게임을 숨길 때. 폴더와 항목은 그대로 둠).
 //   - files: 오프라인 저장할 파일 (path 기준 상대경로). ready 인 게임만 캐시된다.
 //   - storageKey: 게임별 저장 키. 다른 게임과 겹치지 않게 '<id>.save.v1' 형식을 쓴다.
 //   - summary(save): 메인 화면 카드에 보여 줄 한 줄 진행 상황 (선택)
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 16;
+  root.APP_VERSION = 17;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -46,6 +47,7 @@
       desc: '두 그림에서 다른 곳 찾기',
       path: 'games/spot-difference/',
       ready: false,
+      hidden: true, // 아직 샘플만 있음 - 완성되면 이 줄을 지우고 ready: true
       storageKey: 'spot-difference.save.v1',
       files: [],
     },

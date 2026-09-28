@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 16; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 17; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;

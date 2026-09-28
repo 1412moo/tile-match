@@ -20,7 +20,7 @@
 
   function render() {
     list.innerHTML = '';
-    for (const g of games) {
+    for (const g of games.filter(x => !x.hidden)) { // 숨긴 게임(만드는 중)은 목록에 안 보임
       const card = document.createElement('button');
       card.className = 'game-card' + (g.ready ? '' : ' soon');
       card.dataset.game = g.id;

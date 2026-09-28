@@ -83,6 +83,9 @@ console.log('[0] 문법 / 버전 일치 / 게임 목록 파일 검사');
   const keys = games.map(g => g.storageKey);
   if (new Set(keys).size !== keys.length) fail('게임 저장 키 중복');
   if (games[0].storageKey !== 'tilematch.save.v1') fail('타일 매치 기존 저장 키(tilematch.save.v1)가 바뀜');
+  // 숨긴 게임(만드는 중)은 들어갈 수 없고 오프라인 파일에도 들어가지 않아야 함
+  for (const g of games.filter(x => x.hidden)) if (g.ready || g.files.length) fail(`숨긴 게임 ${g.id} 가 ready 이거나 파일 목록이 있음`);
+  if (!read('hub.js').includes('!x.hidden')) fail('메인 화면이 숨긴 게임을 거르지 않음');
   for (const h of htmls) {
     const want = tagVersion[h] || swV;
     const tags = read(h).match(/\?v=\d+/g) || [];
@@ -445,6 +448,60 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   if (names(GS.newYaku(gw.slice(0, 3), gw.slice(0, 4))) !== '사광') fail('사광 감지');
   if (names(GS.newYaku(gw.slice(0, 4), gw.concat([rain]))) !== '오광') fail('오광 감지');
   if (GS.newYaku([gw[0]], [gw[0], rain]).length) fail('광 2장에 알림');
+}
+
+// 7-3) 컴퓨터 고/스톱 판단: 판 상황으로 판단, 유리하면 3고 이상도 가능, 불리하면 스톱
+{
+  console.log('[7-3] 컴퓨터 고/스톱 판단');
+  const pis = GC.filter(c => c.kind === 'pi' && c.pi === 1 && !c.bonus).map(c => c.id);
+  const gw3 = GC.filter(c => c.kind === 'gwang' && !c.rain).map(c => c.id).slice(0, 3);
+  const god = GS.YAKU.find(y => y.key === 'godori').ids;
+  // 컴퓨터(1번)가 고/스톱을 고르는 판: myCap 먹은 패, oppCap 상대 먹은 패, 남은 손패 수, 고 횟수
+  function gostopState(myCap, oppCap, myLeft, oppLeft, go) {
+    const used = new Set([...myCap, ...oppCap]);
+    const rest = [...Array(GS.N_CARDS).keys()].filter(id => !used.has(id));
+    const s = gsBase();
+    s.captured = [oppCap.slice(), myCap.slice()];
+    s.hands = [rest.splice(0, oppLeft), rest.splice(0, myLeft)];
+    s.floor = rest.splice(0, 4); s.deck = rest;
+    s.turn = 1; s.phase = 'gostop'; s.go = [0, go]; s.goScore = [0, go ? GS.bestScore(myCap).total - 1 : 0];
+    return s;
+  }
+  const strong = [...pis.slice(0, 12), ...gw3, ...god];            // 피 12(3점) + 삼광(3) + 고도리(5) = 11점
+  gsEq('강한 판 점수', GS.bestScore(strong).total, 11);
+  // 유리: 상대 0점, 내 차례 넉넉 → 2고에서 3고 (예전에는 2고에서 항상 스톱)
+  if (!GS.aiGoStop(gostopState(strong, [], 4, 4, 2))) fail('유리한 판에서 3고를 안 함');
+  if (!GS.aiGoStop(gostopState(strong, [], 4, 4, 1))) fail('유리한 판에서 2고를 안 함');
+  // 불리: 상대 5점 + 청단 1장 남음 (곧 날 수 있음) → 스톱
+  const oppNear = [pis[12], pis[13], ...GC.filter(c => c.dan === 'hong').map(c => c.id), ...GC.filter(c => c.dan === 'cheong').map(c => c.id).slice(0, 2)];
+  const oppMore = oppNear.concat(GC.filter(c => c.kind === 'yeol' && !c.bird).map(c => c.id).slice(0, 5)); // 홍단 3 + 열끗 5장(1) = 4점 + 청단 비상
+  if (GS.aiGoStop(gostopState(strong, oppMore, 4, 4, 2))) fail('상대가 곧 날 판에서 3고를 함');
+  // 내 손패가 없으면 고 불가 (규칙상 자동 스톱이지만 판단 함수도 스톱)
+  if (GS.aiGoStop(gostopState(strong, [], 0, 1, 0))) fail('남은 패가 없는데 고');
+  // 같은 공개 정보면 같은 판단 (난수 없음, 더미 순서·상대 손패를 보지 않음)
+  const a1 = gostopState(strong, [], 3, 3, 1), a2 = JSON.parse(JSON.stringify(a1));
+  a2.deck.reverse(); [a2.hands[0][0], a2.deck[0]] = [a2.deck[0], a2.hands[0][0]];
+  if (GS.aiGoStop(a1) !== GS.aiGoStop(a2) || GS.aiGoStop(a1) !== GS.aiGoStop(a1)) fail('고/스톱 판단이 숨은 정보나 난수에 따라 달라짐');
+  // 판단 전후로 상태를 바꾸지 않음
+  const before = JSON.stringify(a1); GS.aiGoStop(a1);
+  if (JSON.stringify(a1) !== before) fail('고/스톱 판단이 판 상태를 바꿈');
+  // 컴퓨터끼리 2000판: 3고 이상이 실제로 나오고, 남발하지 않음 (이긴 판의 15% 미만)
+  let seed = 99; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  let wins = 0, three = 0, asked3 = 0, went3 = 0;
+  for (let g = 0; g < 2000; g++) {
+    const t = GS.newRound(rnd, g % 2, 1);
+    for (let k = 0; k < 300 && t.phase !== 'over'; k++) {
+      if (t.phase === 'gostop') { const go = GS.aiGoStop(t); if (t.go[t.turn] === 2) { asked3++; if (go) went3++; } GS.decide(t, go); continue; }
+      const a = GS.aiPick(t, rnd);
+      if (a.dummy) GS.playDummy(t); else if (GS.play(t, a.card, a).bonus) continue;
+      const o = GS.flipOptions(t); GS.flip(t, o ? GS.bestCard(o) : null); GS.endTurn(t);
+    }
+    if (t.phase !== 'over') { fail('판이 끝나지 않음'); break; }
+    if (!t.over.draw) { wins++; if (t.go[t.over.winner] >= 3) three++; }
+  }
+  console.log(`  2000판: 3고 결정 ${asked3}번 중 고 ${went3}번 · 3고 이상으로 이긴 판 ${(100 * three / wins).toFixed(1)}%`);
+  if (!went3 || !three) fail('컴퓨터가 3고 이상을 한 번도 안 함');
+  if (three / wins >= 0.15) fail(`3고 이상이 너무 잦음 (${(100 * three / wins).toFixed(1)}%)`);
 }
 
 // 8) 수박게임: 물리 / 합체 / 점수 / 게임오버 / 저장
