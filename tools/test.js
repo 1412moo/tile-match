@@ -812,8 +812,9 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   {
     for (const base of [(r, c) => (2 * r + c) % 6, (r, c) => (3 * r + c) % 6, (r, c) => (r + 2 * c) % 6]) {
       const st = mkState([], base);
-      st.board[3][3].s = 'bomb'; // 색은 그대로 두고 특수 보석으로
       if (M.findMove(st.board)) { fail('섞기 테스트 판에 움직일 수가 있음'); continue; }
+      st.board[3][3].s = 'bomb'; // 색은 그대로 두고 특수 보석으로 (v0.3: 특수 보석은 옆과 바꾸기만 해도 되는 수)
+      if (!M.findMove(st.board)) fail('특수 보석이 있는데 움직일 수 없다고 판단');
       const before = ids(st.board).sort((a, b) => a - b).join();
       const step = M.shuffle(st, mkRng(5));
       if (step.kind !== 'shuffle' || M.findRuns(st.board).length || !M.findMove(st.board)) fail('섞은 판이 잘못됨');
@@ -844,7 +845,7 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
           if (t.kind !== 'clear') continue;
           if (t.combo >= 2) combos++;
           t.specials.forEach(x => kinds.add(x.s));
-          const want = t.cleared.length * M.CELL_PTS * t.combo + t.specials.reduce((a, x) => a + M.SPECIAL_PTS[x.s], 0);
+          const want = t.cleared.length * M.CELL_PTS * t.combo + t.specials.reduce((a, x) => a + M.SPECIAL_PTS[x.s], 0) + (t.bonus || 0);
           if (t.points !== want) { broken++; fail(`점수 계산 ${t.points} ≠ ${want}`); }
           sum += t.points;
         }
@@ -871,6 +872,100 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
       const b = M.restore(bad, rng);
       if (!full(b.board) || M.findRuns(b.board).length || !M.findMove(b.board) || b.moves !== M.MOVES) fail('망가진 저장에서 새 판을 못 만듦');
     }
+  }
+  // (k) v0.3 특수 보석 쓰기: 특수+일반은 맞춤 없이도 옮겨 간 자리에서 터짐, 특수+특수 조합, 더블탭 발동
+  {
+    const cellsOf = cl => new Set(cl.cleared.map(x => x.r * N + x.c));
+    const sameSet = (got, want) => got.size === want.size && [...want].every(k => got.has(k));
+    const rowK = r => [...Array(N)].map((_, i) => r * N + i), colK = c => [...Array(N)].map((_, i) => i * N + c);
+    const after = (st, name) => { if (!full(st.board) || M.findRuns(st.board).length || new Set(ids(st.board)).size !== N * N) fail(`${name}: 뒤 판 상태 이상`); };
+    // 특수+일반 (맞춤 없음): 가로줄 보석이 (4,5) 로 옮겨 가 4번 줄을 지움, 세로줄은 (3,4) 로 옮겨 가 4번 세로줄
+    let st = mkState([[4, 4, 0, 'row']]);
+    let res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(31));
+    let cl = res.ok && firstClear(res);
+    if (!cl || !sameSet(cellsOf(cl), new Set(rowK(4))) || !cl.fx || cl.fx.type !== 'fire' || cl.fx.r !== 4 || cl.fx.c !== 5) fail(`특수+일반 가로줄: ${cl && cl.cleared.length}칸`);
+    if (st.moves !== M.MOVES - 1) fail('특수+일반도 1수를 씀');
+    after(st, '특수+일반');
+    st = mkState([[4, 4, 0, 'col']]);
+    cl = firstClear(M.play(st, { r: 4, c: 4 }, { r: 3, c: 4 }, mkRng(32)));
+    if (!cl || !sameSet(cellsOf(cl), new Set(colK(4)))) fail('특수+일반 세로줄');
+    st = mkState([[4, 4, 0, 'bomb']]);
+    cl = firstClear(M.play(st, { r: 4, c: 5 }, { r: 4, c: 4 }, mkRng(33))); // 일반을 밀어도 폭탄은 (4,5) 에서 터짐
+    const b33 = new Set(); for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) b33.add((4 + dr) * N + 5 + dc);
+    if (!cl || !sameSet(cellsOf(cl), b33)) fail('특수+일반 폭탄 3×3 (도착 자리 기준)');
+    // 일반+일반은 여전히 맞춤이 없으면 되돌림
+    st = mkState([[4, 4, 0, 'row']]);
+    if (M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, mkRng(1)).ok) fail('일반+일반 맞춤 없는 바꾸기가 됨');
+    // 조합: 가운데 = 옮겨 간 보석이 도착한 칸 (4,5)
+    const combos = [
+      ['줄+줄 십자', 'row', 'col', 'cross', () => new Set([...rowK(4), ...colK(5)])],
+      ['가로+가로 십자', 'row', 'row', 'cross', () => new Set([...rowK(4), ...colK(5)])],
+      ['줄+폭탄 3줄 십자', 'col', 'bomb', 'cross3', () => new Set([3, 4, 5].flatMap(r => rowK(r)).concat([4, 5, 6].flatMap(c => colK(c))))],
+      ['폭탄+폭탄 5×5', 'bomb', 'bomb', 'bomb5', () => { const s = new Set(); for (let r = 2; r <= 6; r++) for (let c = 3; c <= 7; c++) s.add(r * N + c); return s; }],
+    ];
+    for (const [name, sa, sb, type, want] of combos) {
+      st = mkState([[4, 4, 0, sa], [4, 5, 1, sb]]);
+      res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(34));
+      cl = res.ok && firstClear(res);
+      if (!cl || !cl.fx || cl.fx.type !== type || !sameSet(cellsOf(cl), want())) { fail(`${name}: ${cl && cl.fx && cl.fx.type} ${cl && cl.cleared.length}칸 (기대 ${want().size})`); continue; }
+      if (cl.bonus !== M.COMBO_PTS[type] || cl.points !== cl.cleared.length * M.CELL_PTS + M.COMBO_PTS[type]) fail(`${name} 점수 ${cl.points}`);
+      after(st, name);
+    }
+    // 판 가장자리에서는 잘림: 폭탄+폭탄 (0,1)→(0,0) → 3×3
+    st = mkState([[0, 0, 0, 'bomb'], [0, 1, 1, 'bomb']]);
+    cl = firstClear(M.play(st, { r: 0, c: 1 }, { r: 0, c: 0 }, mkRng(35)));
+    if (!cl || cl.cleared.length !== 9) fail(`가장자리 5×5 잘림: ${cl && cl.cleared.length}`);
+    // 조합 범위 안 다른 특수 보석도 연쇄로 터짐: 십자 범위 (0,5) 의 가로줄 → 0번 줄도
+    st = mkState([[4, 4, 0, 'row'], [4, 5, 1, 'col'], [0, 5, 2, 'row']]);
+    cl = firstClear(M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(36)));
+    if (!cl || !rowK(0).every(k => cellsOf(cl).has(k))) fail('조합 범위 안 특수 보석 연쇄');
+    // 무지개+세로줄: 그 색(3) 보석이 모두 세로줄로 바뀌고(교환한 줄 방향 그대로) 터짐. 기본 무늬에서 3번 색은 홀수 세로줄에만 있음
+    st = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'col']]);
+    const n3 = st.board.flat().filter(x => !x.s && x.c === 3).length;
+    res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(37));
+    const cv = res.ok && res.steps.find(t => t.kind === 'convert');
+    cl = res.ok && firstClear(res);
+    if (!cv || cv.s !== 'col' || cv.cells.length !== n3) fail(`무지개+세로줄 변환 ${cv && cv.s} ${cv && cv.cells.length}/${n3}`);
+    if (!cl || cl.fx.type !== 'rbline' || !sameSet(cellsOf(cl), new Set([1, 3, 4, 5, 7].flatMap(colK)))) fail(`무지개+세로줄 범위 ${cl && cl.cleared.length}칸 (기대 40)`);
+    after(st, '무지개+세로줄');
+    // 무지개+가로줄: 가로로 바뀜
+    st = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'row']]);
+    res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(38));
+    const cv2 = res.steps.find(t => t.kind === 'convert');
+    if (!cv2 || cv2.s !== 'row' || firstClear(res).fx.type !== 'rbline') fail('무지개+가로줄 변환 방향');
+    // 무지개+폭탄: 그 색이 모두 폭탄으로 바뀌고 터짐
+    st = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'bomb']]);
+    res = M.play(st, { r: 4, c: 5 }, { r: 4, c: 4 }, mkRng(39));
+    const cv3 = res.steps.find(t => t.kind === 'convert');
+    cl = firstClear(res);
+    if (!cv3 || cv3.s !== 'bomb' || cv3.cells.length !== n3 || cl.fx.type !== 'rbbomb' || cl.triggered.filter(t => t.s === 'bomb').length < n3) fail('무지개+폭탄');
+    after(st, '무지개+폭탄');
+    // 무지개+무지개: 판 전체
+    st = mkState([[4, 4, -1, 'rainbow'], [4, 5, -1, 'rainbow']]);
+    cl = firstClear(M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(40)));
+    if (!cl || cl.cleared.length !== N * N || cl.fx.type !== 'rbrb') fail('무지개+무지개 판 전체');
+    // 무지개+일반: 그 색만 (예전 그대로)
+    st = mkState([[4, 4, -1, 'rainbow']]);
+    cl = firstClear(M.play(st, { r: 4, c: 4 }, { r: 3, c: 4 }, mkRng(41)));
+    const hc = cl && cl.fx && cl.fx.color;
+    if (!cl || cl.fx.s !== 'rainbow' || cl.cleared.some(x => x.s !== 'rainbow' && x.color !== hc)) fail('무지개+일반');
+    // 더블탭 발동: 제자리에서 터짐, 1수 차감. 일반 보석은 안 됨
+    st = mkState([[4, 4, 0, 'bomb']]);
+    res = M.activate(st, { r: 4, c: 4 }, mkRng(42));
+    cl = res.ok && firstClear(res);
+    const b44 = new Set(); for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) b44.add((4 + dr) * N + 4 + dc);
+    if (!cl || !sameSet(cellsOf(cl), b44) || st.moves !== M.MOVES - 1 || cl.fx.type !== 'fire') fail('더블탭 폭탄');
+    after(st, '더블탭');
+    if (M.activate(st, { r: 0, c: 0 }, mkRng(1)).ok && !st.board[0][0].s) fail('일반 보석이 더블탭으로 터짐');
+    st = mkState([[4, 4, 0, 'row']]);
+    cl = firstClear(M.activate(st, { r: 4, c: 4 }, mkRng(43)));
+    if (!cl || !sameSet(cellsOf(cl), new Set(rowK(4)))) fail('더블탭 가로줄');
+    st = mkState([[4, 4, -1, 'rainbow']]);
+    const cnt = new Array(6).fill(0); st.board.flat().forEach(x => { if (!x.s) cnt[x.c]++; });
+    cl = firstClear(M.activate(st, { r: 4, c: 4 }, mkRng(44)));
+    if (!cl || cl.cleared.length !== Math.max(...cnt) + 1) fail(`더블탭 무지개: ${cl && cl.cleared.length}칸 (기대 ${Math.max(...cnt) + 1})`);
+    const done = mkState([[4, 4, 0, 'row']]); done.over = true;
+    if (M.activate(done, { r: 4, c: 4 }, mkRng(1)).ok) fail('끝난 판에서 더블탭 발동');
   }
 }
 
@@ -912,21 +1007,37 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   if (!types.slice(0, 3).every(t => t === 'score') || !types.slice(3, 6).every(t => t === 'color') ||
       !types.slice(6, 8).every(t => t === 'special') || !types.slice(8).every(t => t.includes('+'))) fail(`스테이지 목표 구성: ${types}`);
 
-  // (b) 목표를 채우면 남은 횟수와 상관없이 바로 성공
+  // (b) v0.3: 목표를 채우면 goalMet 만 기록하고 계속 (남은 횟수를 다 쓰거나 '여기서 끝내기' 하면 성공)
   let st = goalState(three, [{ type: 'color', color: 0, count: 3 }]);
+  if (M.finish(st)) fail('목표를 채우기 전에 끝내기가 됨');
   let res = M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (!res.ok || !st.over || st.result !== 'win' || st.moves !== 14) fail(`색 목표 3개: over=${st.over} result=${st.result} moves=${st.moves}`);
+  if (!res.ok || st.over || st.result || !st.goalMet || st.moves !== 14) fail(`색 목표 3개: over=${st.over} result=${st.result} goalMet=${st.goalMet} moves=${st.moves}`);
   if (st.cleared[0] < 3) fail('지운 빨강 보석 수를 안 셈');
+  const scoreAtGoal = st.score;
+  const rngB = mkRng(3);
+  for (let i = 0; i < 3; i++) { const mv = M.findMove(st.board); if (!M.play(st, mv[0], mv[1], rngB).ok) fail('목표 달성 뒤 계속 둘 수 없음'); }
+  if (st.over || !st.goalMet || st.moves !== 11 || st.score <= scoreAtGoal) fail('목표 달성 뒤 점수를 더 모으지 못함');
+  if (!M.finish(st) || !st.over || st.result !== 'win' || st.moves !== 11) fail('여기서 끝내기 → 성공');
+  if (M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, mkRng(1)).ok) fail('끝낸 판에서 움직여짐');
+  // 남은 횟수를 다 쓰면 goalMet 이면 성공
+  st = goalState(three, [{ type: 'color', color: 0, count: 3 }], 2);
+  M.play(st, swap3[0], swap3[1], mkRng(1));
+  let mv0 = M.findMove(st.board); M.play(st, mv0[0], mv0[1], mkRng(2));
+  if (!st.over || st.result !== 'win' || st.moves !== 0) fail(`목표 달성 뒤 횟수를 다 쓰면 성공: ${st.result}`);
+  // 마지막 수로 목표를 채워도 성공
+  st = goalState(three, [{ type: 'color', color: 0, count: 3 }], 1);
+  M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (!st.over || st.result !== 'win') fail('마지막 수로 목표 달성 → 성공');
   st = goalState(three, [{ type: 'score', target: 30 }]);
   M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (st.result !== 'win') fail('점수 목표 30점 바로 성공 안 됨');
+  if (!st.goalMet || st.over) fail('점수 목표 30점 달성 기록');
   st = goalState([[7, 0, 5], [7, 1, 5], [7, 3, 5], [6, 2, 5]], [{ type: 'special', count: 1 }]); // 가로 4 → 특수 1개
   M.play(st, { r: 6, c: 2 }, { r: 7, c: 2 }, mkRng(2));
-  if (st.made < 1 || st.result !== 'win') fail(`특수 보석 목표: made=${st.made} result=${st.result}`);
-  // 복합 목표: 하나만 채우면 계속, 다 채워야 성공
+  if (st.made < 1 || !st.goalMet) fail(`특수 보석 목표: made=${st.made} goalMet=${st.goalMet}`);
+  // 복합 목표: 하나만 채우면 goalMet 아님
   st = goalState(three, [{ type: 'color', color: 0, count: 3 }, { type: 'score', target: 999999 }]);
   M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (st.over || st.result) fail('복합 목표 중 하나만 채웠는데 끝남');
+  if (st.over || st.result || st.goalMet || M.finish(st)) fail('복합 목표 중 하나만 채웠는데 달성/끝남');
   const gp = M.goalProgress(st);
   if (!gp[0].done || gp[1].done || gp[1].need !== 999999) fail('목표 진행도 계산 이상');
   // (c) 횟수를 다 쓰면 실패
@@ -981,6 +1092,13 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   for (let i = 0; i < 4 && !st.over; i++) { const mv = M.findMove(st.board); M.play(st, mv[0], mv[1], r7); }
   const back = M.restore(JSON.parse(JSON.stringify(st)), r7, cfg);
   if (JSON.stringify(back.goals) !== JSON.stringify(cfg.goals) || back.cleared.join() !== st.cleared.join() || back.made !== st.made || back.colors !== 6 || back.moves !== st.moves || back.score !== st.score) fail('이어하기에서 목표/진행도가 바뀜');
+  if (back.goalMet !== st.goalMet) fail('이어하기에서 goalMet 이 바뀜');
+  const met = goalState(three, [{ type: 'color', color: 0, count: 3 }]);
+  M.play(met, swap3[0], swap3[1], mkRng(1));
+  const old = JSON.parse(JSON.stringify(met)); delete old.goalMet; // v0.2 저장 모양
+  if (!M.restore(old, mkRng(2), { goals: met.goals }).goalMet) fail('goalMet 없는 저장: 진행도로 달성 계산 안 됨');
+  const notMet = JSON.parse(JSON.stringify(goalState(three, [{ type: 'color', color: 0, count: 3 }]))); delete notMet.goalMet;
+  if (M.restore(notMet, mkRng(2)).goalMet) fail('목표 안 채운 저장이 달성으로 바뀜');
   const ended = JSON.parse(JSON.stringify(st)); ended.over = true; ended.moves = 0;
   const fresh = M.restore(ended, r7, cfg);
   if (fresh.over || fresh.moves !== cfg.moves || fresh.score !== 0) fail('끝난 판을 이어하기로 불러옴');
@@ -1011,7 +1129,7 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
     for (let i = 0; i < 15; i++) if (smartPlay(x, rng)) w++;
     rates.push(Math.round(100 * w / 15));
   }
-  console.log(`  한 수 앞 자동 플레이 클리어율(%): ${rates.map((r, i) => `${i + 1}:${r}`).join(' ')}`);
+  console.log(`  한 수 앞 자동 플레이 클리어율(%, 목표 달성 뒤에도 끝까지): ${rates.map((r, i) => `${i + 1}:${r}`).join(' ')}`);
   if (rates[0] < 90) fail(`1스테이지가 너무 어려움 (${rates[0]}%)`);
   rates.forEach((r, i) => { if (r < 30) fail(`스테이지 ${i + 1} 클리어율 ${r}% (너무 어려움)`); });
 }

@@ -11,9 +11,9 @@
   <meta name="apple-mobile-web-app-title" content="엄마 게임천국">
   <title>보석 맞추기</title>
   <link rel="manifest" href="../../manifest.webmanifest">
-  <link rel="icon" href="../../icons/icon-192.png?v=20">
-  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=20">
-  <link rel="stylesheet" href="style.css?v=20">
+  <link rel="icon" href="../../icons/icon-192.png?v=21">
+  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=21">
+  <link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
   <!-- 보석 그림 (직접 그린 SVG, 색마다 모양도 달라 색을 구별하기 어려워도 알아볼 수 있게) -->
@@ -57,7 +57,7 @@
         <div id="stage-grid" class="stage-grid" aria-label="스테이지 고르기"></div>
         <p id="record" class="record"></p>
         <button id="btn-sound-home" class="btn light small">🔊 소리 켜짐</button>
-        <p class="howto">보석을 옆으로 밀어 자리를 바꿔요.<br>목표를 채우면 성공! 다음 스테이지가 열려요.<br>4개·5개를 맞추면 특별한 보석이 생겨요!</p>
+        <p class="howto">보석을 옆으로 밀어 자리를 바꿔요.<br>목표를 채우면 성공! 남은 횟수로 별을 더 모아요.<br>4개·5개를 맞추면 특별한 보석이 생겨요!<br>특별한 보석은 두 번 누르면 바로 터져요.</p>
         <p id="app-version" class="version"></p>
       </div>
     </section>
@@ -75,8 +75,14 @@
       <div id="stage">
         <div id="board" aria-label="보석 판"></div>
         <div id="combo" class="hidden"></div>
+        <div id="banner" class="hidden"></div>
       </div>
-      <p id="best" class="best"></p>
+      <!-- 별 게이지: 목표를 채우면 ★1, 점수가 기준을 넘으면 ★2·★3 / 목표를 채운 뒤 여기서 끝내기 -->
+      <div class="bottom">
+        <div id="gauge-stars" class="gauge-stars" aria-label="받을 별"></div>
+        <div id="gauge" class="gauge"><div id="gauge-fill" class="fill"></div><span class="mk m2"><b>★★</b><small></small></span><span class="mk m3"><b>★★★</b><small></small></span></div>
+        <button id="btn-finish" class="finish hidden">🏁 끝내기</button>
+      </div>
     </section>
 
     <div id="overlay" class="hidden">
@@ -89,8 +95,8 @@
     </div>
     <div id="toast" class="hidden"></div>
   </div>
-  <script src="logic.js?v=20"></script>
-  <script src="stages.js?v=20"></script>
-  <script src="game.js?v=20"></script>
+  <script src="logic.js?v=21"></script>
+  <script src="stages.js?v=21"></script>
+  <script src="game.js?v=21"></script>
 </body>
 </html>

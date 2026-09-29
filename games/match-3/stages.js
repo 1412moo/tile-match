@@ -2,25 +2,26 @@
 // 스테이지 추가: STAGES 에 한 줄만 더 넣으면 된다.
 //   moves  : 움직일 수 있는 횟수
 //   colors : 보석 종류 수 (5 = 쉬움, 6 = 보통)
-//   goals  : 목표 (모두 채우면 바로 성공)
+//   goals  : 목표 (모두 채우면 성공 확정, 남은 횟수로 점수를 더 모을 수 있음)
 //            { type: 'score', target }       점수 target 점
 //            { type: 'color', color, count } color 색 보석 count 개 지우기 (0 빨강 1 주황 2 노랑 3 초록 4 파랑 5 보라)
 //            { type: 'special', count }      특수 보석(줄·폭탄·무지개) count 개 만들기
-//   stars  : [★2 점수, ★3 점수]  (★1 은 성공하면)
+//   stars  : [★2 점수, ★3 점수]  (★1 은 성공하면, 최종 점수로 판정)
+//            v0.3: 목표를 채워도 끝까지 두므로 사람처럼 두는 자동 플레이어의 최종 점수 상위 40% / 10% 로 다시 잼
 (function (root) {
   'use strict';
 
   const STAGES = [
-    { id: 1, moves: 15, colors: 5, goals: [{ type: 'score', target: 800 }], stars: [1300, 1700] },
-    { id: 2, moves: 15, colors: 5, goals: [{ type: 'score', target: 1500 }], stars: [1900, 2600] },
-    { id: 3, moves: 16, colors: 5, goals: [{ type: 'score', target: 2200 }], stars: [2700, 3200] },
-    { id: 4, moves: 15, colors: 5, goals: [{ type: 'color', color: 0, count: 12 }], stars: [2100, 2900] },
-    { id: 5, moves: 15, colors: 5, goals: [{ type: 'color', color: 4, count: 18 }], stars: [2700, 3300] },
-    { id: 6, moves: 18, colors: 6, goals: [{ type: 'color', color: 3, count: 18 }], stars: [2500, 3000] },
-    { id: 7, moves: 16, colors: 5, goals: [{ type: 'special', count: 2 }], stars: [1300, 1850] },
-    { id: 8, moves: 18, colors: 5, goals: [{ type: 'special', count: 3 }], stars: [1850, 2500] },
-    { id: 9, moves: 18, colors: 6, goals: [{ type: 'color', color: 2, count: 15 }, { type: 'score', target: 2500 }], stars: [2750, 3000] },
-    { id: 10, moves: 20, colors: 6, goals: [{ type: 'color', color: 5, count: 18 }, { type: 'special', count: 2 }, { type: 'score', target: 3000 }], stars: [3300, 3800] },
+    { id: 1, moves: 15, colors: 5, goals: [{ type: 'score', target: 800 }], stars: [3900, 5600] },
+    { id: 2, moves: 15, colors: 5, goals: [{ type: 'score', target: 1500 }], stars: [4100, 6500] },
+    { id: 3, moves: 16, colors: 5, goals: [{ type: 'score', target: 2200 }], stars: [4200, 6500] },
+    { id: 4, moves: 15, colors: 5, goals: [{ type: 'color', color: 0, count: 12 }], stars: [3400, 5300] },
+    { id: 5, moves: 15, colors: 5, goals: [{ type: 'color', color: 4, count: 18 }], stars: [3900, 5700] },
+    { id: 6, moves: 18, colors: 6, goals: [{ type: 'color', color: 3, count: 18 }], stars: [2700, 3800] },
+    { id: 7, moves: 16, colors: 5, goals: [{ type: 'special', count: 2 }], stars: [4400, 6300] },
+    { id: 8, moves: 18, colors: 5, goals: [{ type: 'special', count: 3 }], stars: [4700, 7400] },
+    { id: 9, moves: 18, colors: 6, goals: [{ type: 'color', color: 2, count: 15 }, { type: 'score', target: 2500 }], stars: [3400, 4400] },
+    { id: 10, moves: 20, colors: 6, goals: [{ type: 'color', color: 5, count: 18 }, { type: 'special', count: 2 }, { type: 'score', target: 3000 }], stars: [3900, 4800] },
   ];
 
   const byId = id => STAGES.find(s => s.id === id) || null;

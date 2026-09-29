@@ -2,8 +2,11 @@
 // 8×8 판, 보석 6종. 가로/세로로 같은 보석 3개 이상 → 사라짐 → 위에서 내려옴 → 연쇄.
 // 특수 보석: 4개 한 줄 → 줄 지우기(가로/세로), 가로·세로가 만나는 모양(ㄱ·ㅗ) → 폭탄(3×3),
 //           5개 한 줄 → 무지개(바꾼 보석과 같은 색을 모두 지움).
-// 스테이지: createGame(rng, { moves, colors, goals }) 로 목표를 주면 목표를 모두 채우는 순간 성공(result 'win'),
-//           이동 횟수를 다 쓰면 실패('lose'). 옵션이 없으면 v0.1 처럼 20번 움직이면 끝.
+// 특수 보석 쓰기 (v0.3): 특수 보석은 옆 보석과 바꾸기만 해도(맞춤이 없어도) 옮겨 간 자리에서 터짐,
+//           특수 보석끼리 바꾸면 조합(십자·3줄 십자·5×5·무지개 변신), activate() 로 제자리에서 바로 터뜨리기.
+// 스테이지: createGame(rng, { moves, colors, goals }) 로 목표를 주면 목표를 모두 채웠을 때 goalMet 만 기록하고
+//           남은 횟수를 계속 쓴다. 횟수를 다 쓰면 goalMet 이면 성공(result 'win'), 아니면 실패('lose').
+//           finish() 로 목표를 채운 뒤 '여기서 끝내기'. 옵션이 없으면 v0.1 처럼 20번 움직이면 끝.
 // 모든 함수는 난수 함수 rng 를 받아 같은 rng 면 같은 결과가 난다.
 (function (root) {
   'use strict';
@@ -13,6 +16,8 @@
   const MOVES = 20;     // 한 판에 움직일 수 있는 횟수
   const CELL_PTS = 10;  // 보석 1개 점수 (연쇄 단계만큼 곱함)
   const SPECIAL_PTS = { row: 60, col: 60, bomb: 90, rainbow: 150 }; // 특수 보석을 만들면 보너스
+  // 특수 보석끼리 바꾼 조합 보너스 (지운 칸 점수와 따로)
+  const COMBO_PTS = { cross: 300, cross3: 450, bomb5: 500, rbline: 600, rbbomb: 600, rbrb: 0 };
 
   // 칸: { id, c: 색(0~5, 무지개는 -1), s: null | 'row' | 'col' | 'bomb' | 'rainbow' }
   function cell(st, c, s) { return { id: st.seq++, c, s: s || null }; }
@@ -45,7 +50,7 @@
     opts = opts || {};
     const st = { v: 1, seq: 1, board: null, score: 0, moves: opts.moves || MOVES, over: false, bestCombo: 0,
       colors: Math.min(COLORS, Math.max(3, opts.colors || COLORS)),
-      goals: opts.goals ? JSON.parse(JSON.stringify(opts.goals)) : null, result: null,
+      goals: opts.goals ? JSON.parse(JSON.stringify(opts.goals)) : null, result: null, goalMet: false,
       cleared: new Array(COLORS).fill(0), made: 0 }; // 지금까지 지운 색별 보석 수, 만든 특수 보석 수
     st.board = freshBoard(st, rng);
     return st;
@@ -127,9 +132,10 @@
   }
 
   // 지울 칸 집합에 들어간 특수 보석을 터뜨려 범위를 넓힌다 (특수 보석끼리 연쇄)
-  function expand(b, clear, triggered) {
+  // used: 이미 조합으로 쓰여 따로 터지지 않을 칸 번호
+  function expand(b, clear, triggered, used) {
     const queue = [...clear];
-    const fired = new Set();
+    const fired = new Set(used || []);
     while (queue.length) {
       const k = queue.shift();
       const r = Math.floor(k / N), c = k % N, x = b[r][c];
@@ -150,10 +156,12 @@
   }
 
   // 한 번 지우기: clear(칸 번호 집합)를 지우고 made(새 특수 보석)를 놓는다. 한 단계 기록을 돌려준다
-  function applyClear(st, clear, made, combo) {
+  // ex: { used: 따로 안 터질 칸, bonus: 조합 보너스, fx: 조합/발동 표시 { type, r, c, s } }
+  function applyClear(st, clear, made, combo, ex) {
+    ex = ex || {};
     const b = st.board;
     const triggered = [];
-    expand(b, clear, triggered);
+    expand(b, clear, triggered, ex.used);
     const cleared = [];
     for (const k of clear) {
       const r = Math.floor(k / N), c = k % N;
@@ -170,10 +178,22 @@
       specials.push({ id: x.id, r: m.r, c: m.c, color: x.c, s: x.s });
       st.made = (st.made || 0) + 1;
     }
-    const points = cleared.length * CELL_PTS * combo + made.reduce((a, m) => a + SPECIAL_PTS[m.s], 0);
+    const bonus = ex.bonus || 0;
+    const points = cleared.length * CELL_PTS * combo + made.reduce((a, m) => a + SPECIAL_PTS[m.s], 0) + bonus;
     st.score += points;
     st.bestCombo = Math.max(st.bestCombo, combo);
-    return { kind: 'clear', cleared, specials, triggered, combo, points };
+    return { kind: 'clear', cleared, specials, triggered, combo, points, bonus, fx: ex.fx || null };
+  }
+
+  // 지금 판의 맞춤으로 지울 칸과 새로 생길 특수 보석 (prefer: 그 자리에 우선 만듦)
+  function matchClear(st, prefer) {
+    const clear = new Set(), made = [];
+    for (const g of groupRuns(findRuns(st.board))) {
+      g.forEach(run => run.cells.forEach(([r, c]) => clear.add(key(r, c))));
+      const sp = specialFor(g, prefer);
+      if (sp) made.push(Object.assign(sp, { color: st.board[g[0].cells[0][0]][g[0].cells[0][1]].c }));
+    }
+    return { clear, made };
   }
 
   // 빈 칸 채우기: 위에 있던 보석이 내려오고, 모자란 만큼 위에서 새 보석
@@ -200,17 +220,8 @@
   function cascade(st, rng, steps, prefer, startCombo) {
     let combo = startCombo || 1;
     for (let guard = 0; guard < 100; guard++) {
-      const runs = findRuns(st.board);
-      if (!runs.length) break;
-      const clear = new Set();
-      const made = [];
-      for (const g of groupRuns(runs)) {
-        g.forEach(run => run.cells.forEach(([r, c]) => clear.add(key(r, c))));
-        const sp = specialFor(g, combo === 1 ? prefer : null);
-        if (sp) {
-          made.push(Object.assign(sp, { color: st.board[g[0].cells[0][0]][g[0].cells[0][1]].c }));
-        }
-      }
+      if (!findRuns(st.board).length) break;
+      const { clear, made } = matchClear(st, combo === 1 ? prefer : null);
       // 특수 보석이 놓일 자리의 원래 보석은 지워지되 그 자리엔 새 특수 보석이 남는다
       steps.push(applyClear(st, clear, made, combo));
       steps.push(gravity(st, rng));
@@ -220,8 +231,64 @@
 
   const adjacent = (a, b) => Math.abs(a.r - b.r) + Math.abs(a.c - b.c) === 1;
 
-  // 두 칸 바꾸기. 맞춤이 생기지 않으면 되돌리고 { ok:false }.
-  // 성공하면 { ok:true, steps: [...] } (지우기/채우기/섞기 단계 기록)
+  // 특수 보석끼리 바꾸기 (둘 다 특수). 가운데 = 옮겨 간 보석이 도착한 칸(bb)
+  //   줄+줄 → 십자(그 가로줄+세로줄), 줄+폭탄 → 3줄 십자(가로 3줄+세로 3줄), 폭탄+폭탄 → 5×5
+  //   무지개+줄/폭탄 → 그 색 보석을 모두 같은 특수 보석(줄은 교환한 줄 보석 방향 그대로)으로 바꾼 뒤 한꺼번에 터뜨림
+  //   무지개+무지개 → 판 전체
+  function comboSwap(st, a, bb, A, B, steps, rng) {
+    const b = st.board;
+    const ka = key(a.r, a.c), kb = key(bb.r, bb.c);
+    const clear = new Set([ka, kb]);
+    const addArea = (r, c) => { if (inside(r, c)) clear.add(key(r, c)); };
+    let type, used = [ka, kb];
+    const rb = A.s === 'rainbow' ? A : B.s === 'rainbow' ? B : null;
+    if (A.s === 'rainbow' && B.s === 'rainbow') {
+      type = 'rbrb';
+      b.forEach((row, r) => row.forEach((_, c) => clear.add(key(r, c))));
+    } else if (rb) {
+      const other = rb === A ? B : A;
+      const rbAt = rb === A ? kb : ka;
+      const color = other.c, s = other.s;
+      type = s === 'bomb' ? 'rbbomb' : 'rbline';
+      const cells = [];
+      b.forEach((row, r) => row.forEach((y, c) => {
+        if (colorOf(y) !== color) return;
+        if (!y.s) { y.s = s; cells.push({ id: y.id, r, c }); }
+        clear.add(key(r, c));
+      }));
+      steps.push({ kind: 'convert', s, color, r: bb.r, c: bb.c, cells });
+      used = [rbAt]; // 무지개만 따로 안 터지고, 바뀐 보석들(교환한 보석 포함)은 모두 터짐
+    } else {
+      const lines = [A.s, B.s].filter(x => x === 'row' || x === 'col').length;
+      if (lines === 2) {
+        type = 'cross';
+        for (let i = 0; i < N; i++) { addArea(bb.r, i); addArea(i, bb.c); }
+      } else if (lines === 1) {
+        type = 'cross3';
+        for (let d = -1; d <= 1; d++) for (let i = 0; i < N; i++) { addArea(bb.r + d, i); addArea(i, bb.c + d); }
+      } else {
+        type = 'bomb5';
+        for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) addArea(bb.r + dr, bb.c + dc);
+      }
+    }
+    steps.push(applyClear(st, clear, [], 1, { used, bonus: COMBO_PTS[type], fx: { type, r: bb.r, c: bb.c } }));
+    steps.push(gravity(st, rng));
+    cascade(st, rng, steps, null, 2);
+  }
+
+  // 한 수를 마친 뒤: 횟수 줄이기, 막히면 섞기, 목표 달성 기록, 끝 판정
+  function endMove(st, rng, steps) {
+    st.moves--;
+    if (!findMove(st.board)) steps.push(shuffle(st, rng));
+    // 목표를 다 채워도 바로 끝나지 않음 (goalMet 만 기록). 횟수를 다 쓰면 goalMet 으로 성공/실패
+    if (st.goals && !st.goalMet && goalsDone(st)) st.goalMet = true;
+    if (st.moves <= 0) { st.over = true; if (st.goals) st.result = st.goalMet ? 'win' : 'lose'; }
+  }
+
+  // 두 칸 바꾸기. 성공하면 { ok:true, steps: [...] } (바꾸기/지우기/채우기/섞기 단계 기록)
+  //   일반+일반: 맞춤이 생기지 않으면 되돌리고 { ok:false }
+  //   특수+일반: 맞춤이 없어도 특수 보석이 옮겨 간 자리에서 터짐 (생긴 맞춤도 함께 지움)
+  //   특수+특수: 조합 (comboSwap)
   function play(st, a, bb, rng) {
     if (st.over || !inside(a.r, a.c) || !inside(bb.r, bb.c) || !adjacent(a, bb)) return { ok: false };
     const b = st.board;
@@ -229,46 +296,73 @@
     if (!A || !B) return { ok: false };
     b[a.r][a.c] = B; b[bb.r][bb.c] = A;
     const steps = [];
-    if (A.s === 'rainbow' || B.s === 'rainbow') {
-      // 무지개: 바꾼 상대와 같은 색을 모두 지움 (무지개끼리면 판 전체)
+    if (A.s && B.s) comboSwap(st, a, bb, A, B, steps, rng);
+    else if (A.s === 'rainbow' || B.s === 'rainbow') {
+      // 무지개+일반: 바꾼 상대와 같은 색을 모두 지움
       const clear = new Set();
       const rb = A.s === 'rainbow' ? { x: A, at: bb } : { x: B, at: a };
       const other = rb.x === A ? B : A;
-      if (other.s === 'rainbow') b.forEach((row, r) => row.forEach((_, c) => clear.add(key(r, c))));
-      else {
-        rb.x.hit = other.c;
-        clear.add(key(rb.at.r, rb.at.c));
-        b.forEach((row, r) => row.forEach((y, c) => { if (colorOf(y) === other.c) clear.add(key(r, c)); }));
-      }
-      steps.push(applyClear(st, clear, [], 1));
+      rb.x.hit = other.c;
+      clear.add(key(rb.at.r, rb.at.c));
+      b.forEach((row, r) => row.forEach((y, c) => { if (colorOf(y) === other.c) clear.add(key(r, c)); }));
+      steps.push(applyClear(st, clear, [], 1, { fx: { type: 'fire', r: rb.at.r, c: rb.at.c, s: 'rainbow', color: other.c } }));
+      steps.push(gravity(st, rng));
+      cascade(st, rng, steps, null, 2);
+    } else if (A.s || B.s) {
+      // 줄/폭탄+일반: 특수 보석이 도착한 자리에서 터짐
+      const sp = A.s ? { x: A, at: bb } : { x: B, at: a };
+      const { clear, made } = matchClear(st, [[a.r, a.c], [bb.r, bb.c]]);
+      clear.add(key(sp.at.r, sp.at.c));
+      steps.push(applyClear(st, clear, made, 1, { fx: { type: 'fire', r: sp.at.r, c: sp.at.c, s: sp.x.s } }));
       steps.push(gravity(st, rng));
       cascade(st, rng, steps, null, 2);
     } else {
       if (!findRuns(b).length) { b[a.r][a.c] = A; b[bb.r][bb.c] = B; return { ok: false }; }
       cascade(st, rng, steps, [[a.r, a.c], [bb.r, bb.c]]);
     }
-    st.moves--;
-    if (!findMove(st.board)) steps.push(shuffle(st, rng));
-    // 목표가 있으면: 다 채우면 남은 횟수와 상관없이 바로 성공, 횟수를 다 쓰면 실패
-    if (st.goals && goalsDone(st)) { st.over = true; st.result = 'win'; }
-    else if (st.moves <= 0) { st.over = true; if (st.goals) st.result = 'lose'; }
+    endMove(st, rng, steps);
     return { ok: true, steps };
   }
 
-  // 움직일 수 있는 수 하나 (없으면 null): 바꿨을 때 3개가 맞거나 무지개를 쓰는 수
+  // 특수 보석을 제자리에서 바로 터뜨리기 (더블탭). 1수를 쓴다. 무지개는 판에 가장 많은 색을 지움
+  function activate(st, p, rng) {
+    if (st.over || !p || !inside(p.r, p.c)) return { ok: false };
+    const x = st.board[p.r][p.c];
+    if (!x || !x.s) return { ok: false };
+    delete x.hit;
+    const steps = [];
+    const fx = { type: 'fire', r: p.r, c: p.c, s: x.s };
+    if (x.s === 'rainbow') fx.color = commonColor(st.board);
+    steps.push(applyClear(st, new Set([key(p.r, p.c)]), [], 1, { fx }));
+    steps.push(gravity(st, rng));
+    cascade(st, rng, steps, null, 2);
+    endMove(st, rng, steps);
+    return { ok: true, steps };
+  }
+
+  // 목표를 다 채운 뒤 '여기서 끝내기': 남은 횟수와 상관없이 성공으로 끝냄
+  function finish(st) {
+    if (st.over || !st.goalMet) return false;
+    st.over = true;
+    st.result = 'win';
+    return true;
+  }
+
+  // 움직일 수 있는 수 하나 (없으면 null): 바꿨을 때 3개가 맞는 수가 먼저, 없으면 특수 보석을 쓰는 수
   function findMove(b) {
+    let special = null;
     for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
       for (const [dr, dc] of [[0, 1], [1, 0]]) {
         const r2 = r + dr, c2 = c + dc;
         if (!inside(r2, c2) || !b[r][c] || !b[r2][c2]) continue;
-        if (b[r][c].s === 'rainbow' || b[r2][c2].s === 'rainbow') return [{ r, c }, { r: r2, c: c2 }];
+        if (b[r][c].s || b[r2][c2].s) { if (!special) special = [{ r, c }, { r: r2, c: c2 }]; continue; }
         const t = b[r][c]; b[r][c] = b[r2][c2]; b[r2][c2] = t;
         const ok = findRuns(b).length > 0;
         b[r2][c2] = b[r][c]; b[r][c] = t;
         if (ok) return [{ r, c }, { r: r2, c: c2 }];
       }
     }
-    return null;
+    return special;
   }
 
   // 더 움직일 수 없을 때: 보석 자리를 섞는다 (특수 보석 포함 그대로, 맞춤 없고 움직일 수 있게)
@@ -299,6 +393,7 @@
       st.moves = Math.max(0, Math.min(99, st.moves | 0));
       if (!Array.isArray(st.cleared) || st.cleared.length !== COLORS) st.cleared = new Array(COLORS).fill(0);
       st.made = st.made | 0;
+      st.goalMet = !!(st.goals && st.goals.length) && (st.goalMet === true || goalsDone(st)); // v0.2 저장엔 없음 → 진행도로 계산
       if (st.over || st.moves <= 0) return createGame(rng, opts); // 끝난 판은 이어할 수 없음
       st.score = Math.max(0, st.score | 0);
       if (findRuns(st.board).length || !findMove(st.board)) shuffle(st, rng);
@@ -306,7 +401,7 @@
     } catch (e) { return createGame(rng, opts); }
   }
 
-  const api = { N, COLORS, MOVES, CELL_PTS, SPECIAL_PTS, createGame, findRuns, findMove, play, shuffle, restore, adjacent, goalProgress, goalsDone };
+  const api = { N, COLORS, MOVES, CELL_PTS, SPECIAL_PTS, COMBO_PTS, createGame, findRuns, findMove, play, activate, finish, shuffle, restore, adjacent, goalProgress, goalsDone };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.M3 = api;
 })(typeof window !== 'undefined' ? window : this);

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 20; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 21; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'match-3.save.v1';
   const M = window.M3;
   const S3 = window.M3S; // 스테이지 데이터 (stages.js)
@@ -95,6 +95,15 @@
       bomb: () => { tone(120, 0, 0.4, 'sine', 0.55, 40); noise({ dur: 0.3, freq: 900, freqTo: 150, q: 0.6, vol: 0.7, type: 'lowpass' }); },
       rainbow: () => [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => tone(f, i * 0.05, 0.2, 'triangle', 0.16)),
       made: () => [784, 1175].forEach((f, i) => tone(f, i * 0.07, 0.16, 'sine', 0.16)),
+      // 특수 보석이 생길 때 (종류마다 다른 소리)
+      makeLine: () => { tone(600, 0, 0.22, 'sine', 0.2, 1800); noise({ dur: 0.18, freq: 2000, freqTo: 6000, q: 1, vol: 0.12, attack: 0.03 }); },
+      makeBomb: () => { tone(150, 0, 0.3, 'sine', 0.4, 90); tone(523, 0.08, 0.2, 'triangle', 0.12); },
+      makeRainbow: () => [1047, 1319, 1568, 2093, 2637].forEach((f, i) => tone(f, i * 0.045, 0.18, 'sine', 0.12)),
+      // 조합이 터질 때: 묵직한 소리 + 화음
+      combo: () => { tone(90, 0, 0.5, 'sine', 0.6, 35); noise({ dur: 0.45, freq: 1200, freqTo: 120, q: 0.5, vol: 0.6, type: 'lowpass' }); [523, 659, 784, 1047].forEach(f => tone(f, 0.08, 0.35, 'triangle', 0.08)); },
+      convert: i => tone(700 + Math.min(i, 20) * 45, 0, 0.07, 'sine', 0.1),
+      chord: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.03, 0.4, 'triangle', 0.12)),
+      goal: () => [784, 988, 1175, 1568].forEach((f, i) => tone(f, i * 0.09, i === 3 ? 0.4 : 0.16, 'triangle', 0.2)),
       land: () => noise({ dur: 0.05, freq: 900, q: 1, vol: 0.18 }),
       shuffle: () => noise({ dur: 0.45, freq: 600, freqTo: 3000, q: 0.7, vol: 0.3, attack: 0.05 }),
       end: () => [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, i * 0.11, 0.22, 'triangle', 0.2)),
@@ -147,6 +156,8 @@
 
   let shownScore = -1, shownMoves = -1;
   let view = null; // 화면에 보이는 진행도 { score, cleared[], made } - 연쇄 단계마다 늘어남
+  let goalCelebrated = false; // 이번 판에서 '목표 달성!' 연출을 했는지 (연쇄 도중 채운 순간)
+  let goalAsked = false;      // 목표 달성 뒤 '계속하기 / 여기서 끝내기' 를 물어봤는지
   const syncView = () => { view = { score: st.score, cleared: st.cleared.slice(), made: st.made }; };
   const iconHTML = g => (g.type === 'color' ? `<svg viewBox="0 0 100 100"><use href="#gem${g.color}"/></svg>`
     : `<span class="gi">${g.type === 'score' ? '🎯' : '✨'}</span>`);
@@ -181,80 +192,218 @@
       }
       el.classList.toggle('done', have >= need);
     });
-    // 별 기준 (넘으면 밝게)
+    // 별 게이지: 목표를 채우면 ★1, 점수가 기준을 넘으면 ★2·★3
     const [s2, s3] = stage.stars;
-    const on = v => (view.score >= v ? 'on' : 'off');
-    $('#best').innerHTML = `<span class="stars-line"><span class="${on(s2)}">★★</span> ${s2.toLocaleString('ko-KR')}점 · <span class="${on(s3)}">★★★</span> ${s3.toLocaleString('ko-KR')}점</span>`;
+    const max = s3 * 1.12;
+    const met = goalCelebrated;
+    const n = met ? S3.starsFor(stage, true, view.score) : 0;
+    $('#gauge-stars').innerHTML = [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : 'off'}">★</span>`).join('');
+    $('#gauge-fill').style.width = Math.min(100, 100 * view.score / max) + '%';
+    const m2 = $('#gauge .m2'), m3 = $('#gauge .m3');
+    m2.style.left = (100 * s2 / max) + '%'; m3.style.left = (100 * s3 / max) + '%';
+    m2.classList.toggle('on', view.score >= s2); m3.classList.toggle('on', view.score >= s3);
+    m2.querySelector('small').textContent = s2.toLocaleString('ko-KR');
+    m3.querySelector('small').textContent = s3.toLocaleString('ko-KR');
+    $('#btn-finish').classList.toggle('hidden', !(st.goalMet && !st.over && goalAsked));
   }
 
   // ---------------- 효과 ----------------
+  const COMBO_LABEL = { cross: '십자 폭발!', cross3: '왕십자 폭발!', bomb5: '대폭발!', rbline: '무지개 변신!', rbbomb: '무지개 변신!', rbrb: '무지개 대폭발!' };
+  const fxEl = (cls, css, life) => {
+    const e = document.createElement('div');
+    e.className = cls;
+    Object.assign(e.style, css);
+    board.appendChild(e);
+    setTimeout(() => e.remove(), life);
+    return e;
+  };
   function sparks(r, c, color, n) {
     for (let i = 0; i < n; i++) {
-      const s = document.createElement('div');
-      s.className = 'spark';
       const a = Math.random() * Math.PI * 2, d = cell * (0.5 + Math.random() * 0.7);
-      s.style.left = ((c + 0.5) * cell - 4) + 'px';
-      s.style.top = ((r + 0.5) * cell - 4) + 'px';
-      s.style.background = color;
+      const s = fxEl('spark', { left: ((c + 0.5) * cell - 4) + 'px', top: ((r + 0.5) * cell - 4) + 'px', background: color }, 460);
       s.style.setProperty('--dx', Math.cos(a) * d + 'px');
       s.style.setProperty('--dy', Math.sin(a) * d + 'px');
-      board.appendChild(s);
-      setTimeout(() => s.remove(), 460);
     }
   }
-  function beam(t) {
-    const b = document.createElement('div');
-    b.className = 'beam';
-    if (t.s === 'row') Object.assign(b.style, { left: '0px', top: (t.r * cell + cell * 0.38) + 'px', width: (N * cell) + 'px', height: (cell * 0.24) + 'px' });
-    else if (t.s === 'col') Object.assign(b.style, { top: '0px', left: (t.c * cell + cell * 0.38) + 'px', height: (N * cell) + 'px', width: (cell * 0.24) + 'px' });
-    else if (t.s === 'bomb') Object.assign(b.style, { left: ((t.c - 1) * cell) + 'px', top: ((t.r - 1) * cell) + 'px', width: (3 * cell) + 'px', height: (3 * cell) + 'px', borderRadius: '30%', background: 'rgba(255,220,120,.6)' });
-    else Object.assign(b.style, { left: '0px', top: '0px', width: (N * cell) + 'px', height: (N * cell) + 'px', borderRadius: '16px', background: 'rgba(255,255,255,.35)' });
-    board.appendChild(b);
-    setTimeout(() => b.remove(), 340);
+  // 줄 빛: 터진 보석 자리에서 양쪽으로 뻗어 나감. thick: 조합이면 굵게
+  function lineBeam(dir, r, c, thick) {
+    const t = cell * (thick ? 0.5 : 0.26), o = (cell - t) / 2;
+    if (dir === 'row') fxEl('beam grow-x', { left: '0px', top: (r * cell + o) + 'px', width: (N * cell) + 'px', height: t + 'px', transformOrigin: `${(c + 0.5) * cell}px 50%` }, 380);
+    else fxEl('beam grow-y', { top: '0px', left: (c * cell + o) + 'px', height: (N * cell) + 'px', width: t + 'px', transformOrigin: `50% ${(r + 0.5) * cell}px` }, 380);
   }
-  function floatText(x, y, text) {
-    const f = document.createElement('div');
-    f.className = 'float';
+  // 폭탄: 둥근 충격파 (size 칸만큼 퍼짐)
+  function shock(r, c, size) {
+    const d = size * cell;
+    fxEl('ring', { left: ((c + 0.5) * cell - d / 2) + 'px', top: ((r + 0.5) * cell - d / 2) + 'px', width: d + 'px', height: d + 'px' }, 420);
+    fxEl('beam', { left: ((c + 0.5) * cell - d / 2) + 'px', top: ((r + 0.5) * cell - d / 2) + 'px', width: d + 'px', height: d + 'px', borderRadius: '30%', background: 'rgba(255,220,120,.55)' }, 340);
+  }
+  // 무지개: 무지개 자리에서 지울 보석마다 가는 빛줄기
+  function rays(r, c, targets) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'rays');
+    svg.setAttribute('width', N * cell); svg.setAttribute('height', N * cell);
+    for (const x of targets) {
+      const l = document.createElementNS(ns, 'line');
+      l.setAttribute('x1', (c + 0.5) * cell); l.setAttribute('y1', (r + 0.5) * cell);
+      l.setAttribute('x2', (x.c + 0.5) * cell); l.setAttribute('y2', (x.r + 0.5) * cell);
+      svg.appendChild(l);
+    }
+    board.appendChild(svg);
+    setTimeout(() => svg.remove(), 380);
+  }
+  function mostColor(list) {
+    const cnt = new Map();
+    list.forEach(x => { if (x.color >= 0) cnt.set(x.color, (cnt.get(x.color) || 0) + 1); });
+    return [...cnt.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0])[0];
+  }
+  function flashAll() { fxEl('beam', { left: '0px', top: '0px', width: (N * cell) + 'px', height: (N * cell) + 'px', borderRadius: '16px', background: 'rgba(255,255,255,.4)' }, 340); }
+  // 판 흔들기 (big: 조합·큰 연쇄)
+  function shake(big) {
+    board.classList.remove('shake', 'shake-big'); void board.offsetWidth;
+    board.classList.add(big ? 'shake-big' : 'shake');
+    clearTimeout(shake.t);
+    shake.t = setTimeout(() => board.classList.remove('shake', 'shake-big'), 320);
+  }
+  function floatText(x, y, text, cls, color) {
+    const f = fxEl('float' + (cls ? ' ' + cls : ''), { left: x + 'px', top: y + 'px' }, 1000);
+    if (color) f.style.color = color;
     f.textContent = text;
-    f.style.left = x + 'px';
-    f.style.top = y + 'px';
-    board.appendChild(f);
-    setTimeout(() => f.remove(), 820);
   }
+  // 연쇄 글자: 2 연쇄 → 작게, 3 연쇄 → 크게, 4 연쇄 이상 → '대단해요!'
   function showCombo(n) {
     const el = $('#combo');
-    el.textContent = `${n} 연쇄!`;
-    el.classList.remove('hidden');
+    el.textContent = n >= 4 ? `${n} 연쇄! 대단해요!` : `${n} 연쇄!`;
+    el.className = 'tier' + Math.min(n, 4);
     el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
     clearTimeout(showCombo.t);
-    showCombo.t = setTimeout(() => el.classList.add('hidden'), 700);
+    showCombo.t = setTimeout(() => el.classList.add('hidden'), 750);
+  }
+  // 가운데 큰 글씨 (조합 이름, 목표 달성 등)
+  function showBanner(text, cls, ms) {
+    const el = $('#banner');
+    el.textContent = text;
+    el.className = cls || '';
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    clearTimeout(showBanner.t);
+    showBanner.t = setTimeout(() => el.classList.add('hidden'), ms || 800);
+  }
+  // 보석 모양 바꾸기 (무지개 변신)
+  function morph(id, s, color) {
+    const el = els.get(id);
+    if (!el) return;
+    el.className = 'gem sp-' + s + ' morph';
+    el.innerHTML = gemHTML({ c: color, s });
+  }
+  function celebrateGoal() {
+    goalCelebrated = true;
+    sfx.goal();
+    showBanner('🎯 목표 달성!', 'goal', 1100);
+    const g = $('#goals');
+    g.classList.remove('win'); void g.offsetWidth; g.classList.add('win');
   }
 
-  // 엔진이 돌려준 단계(지우기/채우기/섞기)를 차례로 보여 준다
+  // 엔진이 돌려준 단계(바꾸기/지우기/채우기/섞기)를 차례로 보여 준다
   async function runSteps(steps) {
     for (const step of steps) {
-      if (step.kind === 'clear') {
+      if (step.kind === 'convert') {
+        // 무지개+줄/폭탄: 그 색 보석이 하나씩 특수 보석으로 바뀜 (합쳐서 0.5초 안)
+        showBanner(COMBO_LABEL[step.s === 'bomb' ? 'rbbomb' : 'rbline'], 'combo', 900);
+        const gap = Math.min(30, 480 / Math.max(1, step.cells.length));
+        const far = x => Math.abs(x.r - step.r) + Math.abs(x.c - step.c);
+        const order = step.cells.slice().sort((a, b) => far(a) - far(b));
+        for (let i = 0; i < order.length; i++) {
+          morph(order[i].id, step.s, step.color);
+          if (i % 2 === 0) sfx.convert(i);
+          await sleep(gap);
+        }
+        await sleep(220);
+      } else if (step.kind === 'clear') {
+        const fx = step.fx;
+        const combo = fx && COMBO_LABEL[fx.type];
+        const origin = fx ? fx : step.triggered[0] || null;
+        let sounds = 0;
+        // 조합 / 직접 발동 연출
+        if (combo) {
+          if (fx.type !== 'rbline' && fx.type !== 'rbbomb') showBanner(COMBO_LABEL[fx.type], 'combo', 900);
+          if (fx.type === 'cross') { lineBeam('row', fx.r, fx.c, true); lineBeam('col', fx.r, fx.c, true); }
+          else if (fx.type === 'cross3') for (let d = -1; d <= 1; d++) { lineBeam('row', fx.r + d, fx.c, true); lineBeam('col', fx.r, fx.c + d, true); }
+          else if (fx.type === 'bomb5') shock(fx.r, fx.c, 5.5);
+          else if (fx.type === 'rbrb') flashAll();
+          sfx.combo(); sounds++;
+          shake(true);
+        }
+        // 한꺼번에 많이 터지면(무지개 변신 등) 빛은 10개까지만 (휴대폰에서 무겁지 않게)
+        for (const t of step.triggered.slice(0, 10)) {
+          if (t.s === 'row' || t.s === 'col') lineBeam(t.s, t.r, t.c);
+          else if (t.s === 'bomb') shock(t.r, t.c, 3.2);
+          else if (t.s === 'rainbow') {
+            // 무지개가 지운 색: 바꾼 상대 색(또는 더블탭이면 가장 많은 색). 다른 특수 보석에 맞았으면 지운 보석 중 가장 많은 색
+            const col = fx && fx.color != null && fx.r === t.r && fx.c === t.c ? fx.color : mostColor(step.cleared);
+            rays(t.r, t.c, step.cleared.filter(x => x.color === col && x.s !== 'rainbow').slice(0, 40));
+          }
+          if (sounds < 3) { (t.s === 'bomb' ? sfx.bomb : t.s === 'rainbow' ? sfx.rainbow : sfx.line)(); sounds++; }
+        }
+        if (!combo && step.triggered.some(t => t.s === 'bomb')) shake(false);
         if (step.combo >= 2) showCombo(step.combo);
-        for (const t of step.triggered) { beam(t); (t.s === 'bomb' ? sfx.bomb : t.s === 'rainbow' ? sfx.rainbow : sfx.line)(); }
-        sfx.pop(step.combo);
-        let sx = 0, sy = 0;
+        if (step.combo >= 4) { sfx.chord(); shake(true); } else sfx.pop(step.combo);
+        if (!combo && step.cleared.length >= 20) showBanner('굉장해요!', 'wow', 700);
+        // 새 특수 보석 자리로 모여드는 보석 (같은 색, 같은 줄, 가까이)
+        const trig = new Set(step.triggered.map(t => t.r * N + t.c));
+        const gatherTo = new Map();
+        for (const sp of step.specials) {
+          const at = step.cleared.find(x => x.r === sp.r && x.c === sp.c);
+          const spColor = sp.s === 'rainbow' ? (at ? at.color : -2) : sp.color;
+          for (const x of step.cleared) {
+            if (gatherTo.has(x.id) || trig.has(x.r * N + x.c) || x.color !== spColor) continue;
+            if ((x.r === sp.r || x.c === sp.c) && Math.abs(x.r - sp.r) + Math.abs(x.c - sp.c) <= 4) gatherTo.set(x.id, sp);
+          }
+        }
+        // 터지는 순서: 터진 자리에서 가까운 보석부터 (최대 0.22초)
+        const dist = x => (origin ? Math.abs(x.r - origin.r) + Math.abs(x.c - origin.c) : 0);
+        const perSpark = step.cleared.length <= 12 ? 3 : step.cleared.length <= 30 ? 1 : 0;
+        let maxDelay = 0, sx = 0, sy = 0;
+        const colorCount = new Map();
         for (const x of step.cleared) {
           const el = els.get(x.id);
-          if (el) { el.classList.add('pop'); setTimeout(() => el.remove(), 200); els.delete(x.id); }
-          if (step.cleared.length <= 12) sparks(x.r, x.c, GEM_COLORS[x.color] || '#fff', 3);
+          els.delete(x.id);
           sx += x.c; sy += x.r;
+          if (x.color >= 0) colorCount.set(x.color, (colorCount.get(x.color) || 0) + 1);
+          const g = gatherTo.get(x.id);
+          if (g && el) { el.classList.add('gather'); place(el, g.r, g.c, 130, 'ease-in'); setTimeout(() => el.remove(), 150); continue; }
+          const delay = origin ? Math.min(dist(x) * 22, 220) : 0;
+          maxDelay = Math.max(maxDelay, delay);
+          const go = () => {
+            if (el) { el.classList.add('pop'); setTimeout(() => el.remove(), 200); }
+            if (perSpark) sparks(x.r, x.c, GEM_COLORS[x.color] || '#fff', perSpark);
+          };
+          if (delay) setTimeout(go, delay); else go();
         }
         const n = step.cleared.length || 1;
-        floatText((sx / n + 0.5) * cell, (sy / n + 0.5) * cell, `+${step.points}`);
-        if (step.specials.length) sfx.made();
-        await sleep(200);
-        for (const x of step.specials) makeEl(x, x.r, x.c).classList.add('appear');
+        const tint = colorCount.size === 1 ? GEM_COLORS[[...colorCount.keys()][0]] : null;
+        const big = combo || step.cleared.length >= 20;
+        floatText((sx / n + 0.5) * cell, (sy / n + 0.5) * cell, `+${step.points.toLocaleString('ko-KR')}${step.combo >= 3 ? ' ×' + step.combo : ''}`, big ? 'big' : '', tint);
+        if (step.specials.length) {
+          await sleep(140);
+          for (const x of step.specials) {
+            const el = makeEl(x, x.r, x.c);
+            el.classList.add('appear');
+            fxEl('make-ring ' + x.s, { left: (x.c * cell) + 'px', top: (x.r * cell) + 'px', width: cell + 'px', height: cell + 'px' }, 520);
+          }
+          const kinds = step.specials.map(x => x.s);
+          if (kinds.includes('rainbow')) sfx.makeRainbow();
+          else if (kinds.includes('bomb')) sfx.makeBomb();
+          else sfx.makeLine();
+          await sleep(Math.max(60, maxDelay + 200 - 140));
+        } else await sleep(maxDelay + 200);
         if (view) {
           view.score += step.points;
           step.cleared.forEach(x => { if (x.color >= 0) view.cleared[x.color]++; });
           view.made += step.specials.length;
         }
         updateHud();
+        // 연쇄 도중 목표를 다 채운 순간
+        if (!goalCelebrated && stage && stage.goals.length && M.goalProgress(Object.assign({}, st, { score: view.score, cleared: view.cleared, made: view.made })).every(g => g.done)) celebrateGoal();
         await sleep(40);
       } else if (step.kind === 'fall') {
         let longest = 0;
@@ -317,10 +466,27 @@
     drag = null;
     if (!d || d.moved || busy) return;
     // 밀지 않고 눌렀다 떼면: 한 번 누르면 고르고, 옆 보석을 누르면 바꾸기
+    // 고른 특수 보석을 한 번 더 누르면 바로 터짐 (일반 보석은 고르기 취소)
     if (sel && M.adjacent(sel, d.p)) trySwap(sel, d.p);
-    else if (sel && sel.r === d.p.r && sel.c === d.p.c) select(null);
-    else select(d.p);
+    else if (sel && sel.r === d.p.r && sel.c === d.p.c) {
+      if (st.board[d.p.r][d.p.c].s) tryActivate(d.p);
+      else select(null);
+    } else {
+      select(d.p);
+      if (st.board[d.p.r][d.p.c].s && !save.tapTip) showTip(d.p, '한 번 더 누르면 터져요');
+    }
   });
+  // 고른 보석 위 말풍선 (특수 보석 첫 사용 안내)
+  function showTip(p, text) {
+    board.querySelectorAll('.tip').forEach(e => e.remove());
+    const t = document.createElement('div');
+    t.className = 'tip' + (p.r < 1 ? ' below' : '');
+    t.textContent = text;
+    t.style.left = Math.min(Math.max((p.c + 0.5) * cell, 70), N * cell - 70) + 'px';
+    t.style.top = (p.r < 1 ? (p.r + 1) * cell + 4 : p.r * cell - 4) + 'px';
+    board.appendChild(t);
+    setTimeout(() => t.remove(), 2200);
+  }
   board.addEventListener('pointercancel', () => { drag = null; });
 
   async function trySwap(a, b) {
@@ -341,15 +507,62 @@
       scheduleHint();
       return;
     }
+    await afterMove(res);
+  }
+
+  // 특수 보석 더블탭: 제자리에서 바로 터뜨림 (1수)
+  async function tryActivate(p) {
+    if (busy || !st || st.over) return;
+    busy = true;
+    select(null);
+    clearHint();
+    board.querySelectorAll('.tip').forEach(e => e.remove());
+    const res = M.activate(st, p, Math.random);
+    if (!res.ok) { busy = false; return; }
+    if (!save.tapTip) { save.tapTip = true; persist(); }
+    await afterMove(res);
+  }
+
+  // 한 수를 보여 준 뒤: 끝났으면 결과, 목표를 처음 채웠으면 '계속하기 / 여기서 끝내기'
+  async function afterMove(res) {
     const game = st;
     await runSteps(res.steps);
     if (st !== game) return;
     syncView(); // 화면 진행도를 실제 값과 맞춤
+    if (st.goalMet && !goalCelebrated) celebrateGoal();
     updateHud();
     if (st.over) { gameOver(); busy = false; return; }
     saveGame();
+    if (st.goalMet && !goalAsked) {
+      // '목표 달성!' 글씨를 잠깐 보여 준 뒤 물어봄 (그 사이 보석을 못 움직이게 busy 유지)
+      goalAsked = true;
+      setTimeout(() => { if (st === game) { busy = false; askGoal(); } }, 450);
+      return;
+    }
     busy = false;
     scheduleHint();
+  }
+  function askGoal() {
+    if (!st || st.over || gameEl.classList.contains('hidden')) return;
+    const [s2, s3] = stage.stars;
+    showModal({
+      emoji: '🎯', title: '목표 달성!',
+      body: `지금 끝내도 <b>★1</b> 확정!<br>남은 <b>${st.moves}번</b>으로 점수를 더 모으면<br>★★ ${s2.toLocaleString('ko-KR')}점 · ★★★ ${s3.toLocaleString('ko-KR')}점`,
+      buttons: [
+        { label: '계속하기', onClick: () => { hideModal(); updateHud(); scheduleHint(); } },
+        { label: '여기서 끝내기', light: true, onClick: finishNow },
+      ],
+    });
+  }
+  // 목표를 채운 뒤 '여기서 끝내기': 지금 점수로 별 계산
+  function finishNow() {
+    if (!st || busy || !M.finish(st)) return;
+    hideModal();
+    clearHint();
+    select(null);
+    syncView();
+    updateHud();
+    gameOver();
   }
 
   // 한동안 가만히 있으면 움직일 수 있는 두 보석을 살짝 흔들어 알려 줌
@@ -478,7 +691,7 @@
     };
     showModal({
       emoji: '', title: `스테이지 ${id}`,
-      body: `<div><b>목표</b></div>${goalListHTML(x.goals, false)}<div class="moves-note">${x.moves}번 안에 해내면 성공!</div>`,
+      body: `<div><b>목표</b></div>${goalListHTML(x.goals, false)}<div class="moves-note">${x.moves}번 안에 해내면 성공!<br>남은 횟수로 점수를 더 모으면 별이 늘어요</div>`,
       buttons: [
         { label: '시작', onClick: start },
         { label: '닫기', light: true, onClick: hideModal },
@@ -495,6 +708,8 @@
     st = saved ? M.restore(saved, Math.random, opts) : M.createGame(Math.random, opts);
     busy = false; sel = null; drag = null;
     shownScore = -1; shownMoves = -1;
+    goalCelebrated = goalAsked = !!st.goalMet; // 이어하기: 이미 목표를 채운 판이면 다시 묻지 않음
+    $('#goals').classList.remove('win');
     syncView();
     showScreen(gameEl);
     $('#stage-label').textContent = `스테이지 ${stage.id}`;
@@ -532,6 +747,7 @@
   });
   $('#btn-home').addEventListener('click', goHome);
   $('#btn-sound').addEventListener('click', toggleSound);
+  $('#btn-finish').addEventListener('click', () => { sfx.unlock(); finishNow(); });
   $('#btn-sound-home').addEventListener('click', toggleSound);
   $('#btn-hub').addEventListener('click', () => {
     let fromHub = false;
@@ -549,7 +765,7 @@
   showHome();
 
   // 확인용 (개발자 도구에서 사용)
-  window.__m3 = { get st() { return st; }, get stage() { return stage; }, trySwap, get busy() { return busy; } };
+  window.__m3 = { get st() { return st; }, get stage() { return stage; }, trySwap, tryActivate, finishNow, get busy() { return busy; } };
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('../../sw.js', { scope: '../../' }).catch(() => { });
