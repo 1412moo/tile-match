@@ -1,9 +1,10 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 19; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 20; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'match-3.save.v1';
   const M = window.M3;
+  const S3 = window.M3S; // 스테이지 데이터 (stages.js)
   const N = M.N;
   const GEM_COLORS = ['#ef4444', '#f59e0b', '#facc15', '#22c55e', '#3b82f6', '#a855f7'];
 
@@ -12,19 +13,22 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // ---------------- 저장 (보석 맞추기 전용 키) ----------------
-  let save = { sound: true, best: 0, games: 0, current: null };
+  // { v:2, sound, progress: { unlocked, stars, best }, current: { stage, st } | null }
+  let save = S3.migrate(null);
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (raw) save = Object.assign(save, JSON.parse(raw));
+    if (raw) save = S3.migrate(JSON.parse(raw)); // v0.1 자유 플레이 하던 판은 여기서 정리됨
   } catch (e) { /* 저장소 사용 불가 - 기본값 */ }
   function persist() {
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* 무시 */ }
   }
+  persist(); // 정리한 형식으로 바로 저장 (v0.1 저장이 남아 있지 않게)
 
   let st = null;       // 지금 판 (logic.js 상태)
+  let stage = null;    // 지금 스테이지 (stages.js)
   function saveGame() {
     if (!st) return;
-    save.current = st.over ? null : st;
+    save.current = st.over ? null : { stage: stage.id, st };
     persist();
   }
 
@@ -142,20 +146,45 @@
   const elAt = (r, c) => els.get(st.board[r][c].id);
 
   let shownScore = -1, shownMoves = -1;
+  let view = null; // 화면에 보이는 진행도 { score, cleared[], made } - 연쇄 단계마다 늘어남
+  const syncView = () => { view = { score: st.score, cleared: st.cleared.slice(), made: st.made }; };
+  const iconHTML = g => (g.type === 'color' ? `<svg viewBox="0 0 100 100"><use href="#gem${g.color}"/></svg>`
+    : `<span class="gi">${g.type === 'score' ? '🎯' : '✨'}</span>`);
+  function renderGoals() {
+    $('#goals').innerHTML = stage.goals.map((g, i) => `<div class="goal" data-i="${i}">${iconHTML(g)}<span class="count"></span></div>`).join('');
+  }
   function updateHud() {
     if (!st) return;
+    if (!view) syncView();
     const s = $('#score'), m = $('#moves');
-    if (st.score !== shownScore) {
-      s.textContent = st.score.toLocaleString('ko-KR');
+    if (view.score !== shownScore) {
+      s.textContent = view.score.toLocaleString('ko-KR');
       if (shownScore >= 0) { s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump'); }
-      shownScore = st.score;
+      shownScore = view.score;
     }
     if (st.moves !== shownMoves) {
       m.textContent = st.moves;
       shownMoves = st.moves;
     }
-    m.parentElement.classList.toggle('low', st.moves <= 5);
-    $('#best').textContent = save.best ? `최고 ${Math.max(save.best, st.score).toLocaleString('ko-KR')}점` : '';
+    m.parentElement.classList.toggle('low', st.moves <= 3);
+    // 목표: 색·특수는 남은 개수, 점수는 지금/목표
+    stage.goals.forEach((g, i) => {
+      const el = $(`#goals .goal[data-i="${i}"]`);
+      if (!el) return;
+      const have = g.type === 'score' ? view.score : g.type === 'color' ? view.cleared[g.color] : view.made;
+      const need = g.type === 'score' ? g.target : g.count;
+      const text = g.type === 'score' ? `${Math.min(have, need).toLocaleString('ko-KR')}/${need.toLocaleString('ko-KR')}` : String(Math.max(0, need - have));
+      const cnt = el.querySelector('.count');
+      if (cnt.textContent !== text) {
+        if (cnt.textContent) { el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
+        cnt.textContent = text;
+      }
+      el.classList.toggle('done', have >= need);
+    });
+    // 별 기준 (넘으면 밝게)
+    const [s2, s3] = stage.stars;
+    const on = v => (view.score >= v ? 'on' : 'off');
+    $('#best').innerHTML = `<span class="stars-line"><span class="${on(s2)}">★★</span> ${s2.toLocaleString('ko-KR')}점 · <span class="${on(s3)}">★★★</span> ${s3.toLocaleString('ko-KR')}점</span>`;
   }
 
   // ---------------- 효과 ----------------
@@ -220,6 +249,11 @@
         if (step.specials.length) sfx.made();
         await sleep(200);
         for (const x of step.specials) makeEl(x, x.r, x.c).classList.add('appear');
+        if (view) {
+          view.score += step.points;
+          step.cleared.forEach(x => { if (x.color >= 0) view.cleared[x.color]++; });
+          view.made += step.specials.length;
+        }
         updateHud();
         await sleep(40);
       } else if (step.kind === 'fall') {
@@ -310,6 +344,7 @@
     const game = st;
     await runSteps(res.steps);
     if (st !== game) return;
+    syncView(); // 화면 진행도를 실제 값과 맞춤
     updateHud();
     if (st.over) { gameOver(); busy = false; return; }
     saveGame();
@@ -358,27 +393,49 @@
     toastTimer = setTimeout(() => el.classList.add('hidden'), 1500);
   }
 
+  const starsHTML = n => [1, 2, 3].map(i => `<span class="${i <= n ? 'on' : 'off'}" style="animation-delay:${(i - 1) * 0.18}s">★</span>`).join('');
+  function goalListHTML(goals, withProgress) {
+    const prog = withProgress ? M.goalProgress(st) : null;
+    return '<ul class="goal-list">' + goals.map((g, i) => {
+      const p = prog && prog[i];
+      const tail = p ? (p.done ? ' ✓' : ` (${g.type === 'score' ? p.have.toLocaleString('ko-KR') + '점' : p.have + '/' + p.need})`) : '';
+      return `<li>${iconHTML(g)}<span>${S3.goalText(g)}${tail}</span></li>`;
+    }).join('') + '</ul>';
+  }
   function gameOver() {
+    const won = st.result === 'win';
     const score = st.score;
-    const newBest = score > save.best;
-    if (newBest) save.best = score;
-    save.games = (save.games || 0) + 1;
+    const before = save.progress.stars[stage.id] || 0;
+    save.progress = S3.applyResult(save.progress, stage.id, won, score);
     save.current = null;
     persist();
-    sfx.end();
+    const stars = S3.starsFor(stage, won, score);
+    const next = S3.byId(stage.id + 1);
+    (won ? sfx.end : sfx.bad)();
     setTimeout(() => {
       if (!st || !st.over || gameEl.classList.contains('hidden')) return;
-      showModal({
-        emoji: newBest ? '🏆' : '💎',
-        title: '한 판 끝!',
-        body: `<span class="big-score">${score.toLocaleString('ko-KR')}점</span>` +
-          (newBest ? '<span class="new-best">최고 기록이에요! 🎉</span>' : `최고 ${save.best.toLocaleString('ko-KR')}점`) +
-          (st.bestCombo >= 3 ? `<br>최대 ${st.bestCombo} 연쇄` : ''),
-        buttons: [
-          { label: '한 판 더', onClick: () => startGame(null) },
-          { label: '메뉴로', light: true, onClick: goHome },
-        ],
-      });
+      if (won) {
+        showModal({
+          emoji: '', title: `스테이지 ${stage.id} 성공!`,
+          body: `<div class="big-stars">${starsHTML(stars)}</div><span class="big-score">${score.toLocaleString('ko-KR')}점</span>` +
+            (stars > before && before > 0 ? '<span class="new-best">별이 늘었어요! 🎉</span>' : '') +
+            (!next ? '<br>🎉 모든 스테이지를 깼어요!' : ''),
+          buttons: [
+            ...(next ? [{ label: `다음 스테이지 ▶`, onClick: () => openStage(next.id) }] : []),
+            { label: '다시 하기', light: true, onClick: () => startStage(stage.id) },
+            { label: '스테이지 목록', light: true, onClick: goHome },
+          ],
+        });
+      } else {
+        showModal({
+          emoji: '😢', title: '아쉬워요!',
+          body: `움직일 수 있는 횟수를 다 썼어요.${goalListHTML(stage.goals, true)}`,
+          buttons: [
+            { label: '다시 하기', onClick: () => startStage(stage.id) },
+            { label: '스테이지 목록', light: true, onClick: goHome },
+          ],
+        });
+      }
     }, 500);
   }
 
@@ -394,17 +451,54 @@
     showScreen(homeEl);
     const cur = save.current;
     $('#btn-continue').classList.toggle('hidden', !cur);
-    $('#continue-info').textContent = cur ? `남은 ${cur.moves}번 · ${(cur.score | 0).toLocaleString('ko-KR')}점` : '';
-    $('#btn-new').className = cur ? 'btn light' : 'btn big';
-    $('#record').textContent = save.best ? `🏆 최고 점수 ${save.best.toLocaleString('ko-KR')}점` : '';
+    $('#continue-info').textContent = cur ? `스테이지 ${cur.stage} · 남은 ${cur.st.moves}번` : '';
+    // 다음에 할 스테이지: 열린 것 중 아직 안 깬 첫 스테이지 (다 깼으면 마지막)
+    const p = save.progress;
+    const nextId = S3.STAGES.find(x => x.id <= p.unlocked && !p.stars[x.id]) ? S3.STAGES.find(x => x.id <= p.unlocked && !p.stars[x.id]).id : p.unlocked;
+    const play = $('#btn-play');
+    play.textContent = `스테이지 ${nextId} 시작`;
+    play.dataset.stage = nextId;
+    play.className = cur ? 'btn light' : 'btn big';
+    $('#stage-grid').innerHTML = S3.STAGES.map(x => {
+      if (x.id > p.unlocked) return `<button class="stage-btn locked" disabled aria-label="스테이지 ${x.id} 잠김">🔒</button>`;
+      const n = p.stars[x.id] || 0;
+      return `<button class="stage-btn${x.id === nextId ? ' next' : ''}" data-stage="${x.id}" aria-label="스테이지 ${x.id}, 별 ${n}개">${x.id}<span class="st">${[1, 2, 3].map(i => `<span class="${i <= n ? '' : 'off'}">★</span>`).join('')}</span></button>`;
+    }).join('');
+    const total = S3.totalStars(p);
+    $('#record').textContent = total ? `⭐ 모은 별 ${total} / ${S3.STAGES.length * 3}` : '';
     updateSoundButtons();
+  }
+  // 스테이지 소개 창: 목표와 횟수를 보여 주고 '시작'
+  function openStage(id) {
+    const x = S3.byId(id);
+    if (!x || id > save.progress.unlocked) return;
+    const start = () => {
+      if (save.current && save.current.stage !== id) save.current = null; // 다른 스테이지를 시작하면 하던 판은 버림
+      startStage(id);
+    };
+    showModal({
+      emoji: '', title: `스테이지 ${id}`,
+      body: `<div><b>목표</b></div>${goalListHTML(x.goals, false)}<div class="moves-note">${x.moves}번 안에 해내면 성공!</div>`,
+      buttons: [
+        { label: '시작', onClick: start },
+        { label: '닫기', light: true, onClick: hideModal },
+      ],
+    });
+  }
+  function startStage(id, saved) {
+    stage = S3.byId(id);
+    startGame(saved);
   }
   function startGame(saved) {
     hideModal();
-    st = saved ? M.restore(saved, Math.random) : M.createGame(Math.random);
+    const opts = { moves: stage.moves, colors: stage.colors, goals: stage.goals };
+    st = saved ? M.restore(saved, Math.random, opts) : M.createGame(Math.random, opts);
     busy = false; sel = null; drag = null;
     shownScore = -1; shownMoves = -1;
+    syncView();
     showScreen(gameEl);
+    $('#stage-label').textContent = `스테이지 ${stage.id}`;
+    renderGoals();
     layout();
     renderAll();
     updateHud();
@@ -417,6 +511,7 @@
     if (st && !st.over && !busy) saveGame();
     clearHint();
     st = null;
+    view = null;
   }
   function goHome() {
     leaveGame();
@@ -429,18 +524,11 @@
   });
   window.addEventListener('resize', layout);
 
-  $('#btn-continue').addEventListener('click', () => { sfx.unlock(); if (save.current) startGame(save.current); });
-  $('#btn-new').addEventListener('click', () => {
-    sfx.unlock();
-    if (!save.current) return startGame(null);
-    showModal({
-      emoji: '💎', title: '새 게임',
-      body: `하던 판(${(save.current.score | 0).toLocaleString('ko-KR')}점)은 사라져요.<br>새로 시작할까요?`,
-      buttons: [
-        { label: '새로 시작', onClick: () => startGame(null) },
-        { label: '그만두기', light: true, onClick: hideModal },
-      ],
-    });
+  $('#btn-continue').addEventListener('click', () => { sfx.unlock(); if (save.current) startStage(save.current.stage, save.current.st); });
+  $('#btn-play').addEventListener('click', () => { sfx.unlock(); openStage(+$('#btn-play').dataset.stage); });
+  $('#stage-grid').addEventListener('click', e => {
+    const b = e.target.closest('.stage-btn[data-stage]');
+    if (b) { sfx.unlock(); openStage(+b.dataset.stage); }
   });
   $('#btn-home').addEventListener('click', goHome);
   $('#btn-sound').addEventListener('click', toggleSound);
@@ -461,7 +549,7 @@
   showHome();
 
   // 확인용 (개발자 도구에서 사용)
-  window.__m3 = { get st() { return st; }, trySwap, get busy() { return busy; } };
+  window.__m3 = { get st() { return st; }, get stage() { return stage; }, trySwap, get busy() { return busy; } };
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('../../sw.js', { scope: '../../' }).catch(() => { });

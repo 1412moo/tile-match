@@ -8,7 +8,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 19;
+  root.APP_VERSION = 20;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -70,8 +70,9 @@
       path: 'games/match-3/',
       ready: true,
       storageKey: 'match-3.save.v1',
-      files: ['', 'index.html', 'style.css', 'logic.js', 'game.js'],
-      summary: s => (s.current ? `남은 ${s.current.moves}번 · ${(s.current.score | 0).toLocaleString('ko-KR')}점` : s.best ? `최고 ${s.best.toLocaleString('ko-KR')}점` : ''),
+      files: ['', 'index.html', 'style.css', 'logic.js', 'stages.js', 'game.js'],
+      summary: s => (s.current && s.current.stage ? `스테이지 ${s.current.stage} 하던 판 있어요`
+        : s.progress && s.progress.unlocked > 1 ? `스테이지 ${s.progress.unlocked}까지 열렸어요` : ''),
     },
   ];
 })(typeof self !== 'undefined' ? self : this);

@@ -874,5 +874,147 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   }
 }
 
+// 9-2) 보석 맞추기 스테이지 (v0.2)
+{
+  console.log('[9-2] 보석 맞추기 스테이지: 데이터 / 목표 / 성공·실패 / 별 / 해금 / 저장 정리');
+  const M = require('../games/match-3/logic.js');
+  const S3 = require('../games/match-3/stages.js');
+  const N = M.N;
+  const mkRng = sd => () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  // 기본 무늬 (2r+c)%6 판에 목표를 붙인 상태
+  function goalState(set, goals, moves) {
+    let seq = 1;
+    const board = Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, c) => ({ id: seq++, c: (2 * r + c) % 6, s: null })));
+    for (const [r, c, col, sp] of set) board[r][c] = { id: seq++, c: col, s: sp || null };
+    return { v: 1, seq, board, score: 0, moves: moves || 15, over: false, bestCombo: 0, colors: 6, goals, result: null, cleared: [0, 0, 0, 0, 0, 0], made: 0 };
+  }
+  const three = [[7, 0, 0], [7, 1, 0], [6, 2, 0]];        // (6,2)↔(7,2) 로 빨강 3개
+  const swap3 = [{ r: 6, c: 2 }, { r: 7, c: 2 }];
+
+  // (a) 스테이지 데이터
+  const ids = S3.STAGES.map(x => x.id);
+  if (ids.join() !== [...Array(S3.STAGES.length)].map((_, i) => i + 1).join()) fail(`스테이지 번호가 1부터 차례대로가 아님: ${ids}`);
+  if (S3.STAGES.length !== 10) fail(`스테이지 수 ${S3.STAGES.length} (기대 10)`);
+  for (const x of S3.STAGES) {
+    if (!(x.moves >= 5 && x.moves <= 40) || !(x.colors >= 4 && x.colors <= M.COLORS)) fail(`스테이지 ${x.id}: 횟수/색 수 이상`);
+    if (!x.goals.length) fail(`스테이지 ${x.id}: 목표 없음`);
+    for (const g of x.goals) {
+      if (!['score', 'color', 'special'].includes(g.type)) fail(`스테이지 ${x.id}: 모르는 목표 ${g.type}`);
+      if (g.type === 'color' && !(g.color >= 0 && g.color < x.colors && g.count > 0)) fail(`스테이지 ${x.id}: 이 판에 없는 색 목표`);
+      if (g.type === 'score' && !(g.target > 0)) fail(`스테이지 ${x.id}: 점수 목표 이상`);
+      if (g.type === 'special' && !(g.count > 0)) fail(`스테이지 ${x.id}: 특수 목표 이상`);
+      if (!S3.goalText(g)) fail(`스테이지 ${x.id}: 목표 글 없음`);
+    }
+    const sg = x.goals.find(g => g.type === 'score');
+    if (!(x.stars[0] < x.stars[1]) || (sg && x.stars[0] <= sg.target)) fail(`스테이지 ${x.id}: 별 기준 이상 ${x.stars}`);
+  }
+  const types = S3.STAGES.map(x => x.goals.map(g => g.type).join('+'));
+  if (!types.slice(0, 3).every(t => t === 'score') || !types.slice(3, 6).every(t => t === 'color') ||
+      !types.slice(6, 8).every(t => t === 'special') || !types.slice(8).every(t => t.includes('+'))) fail(`스테이지 목표 구성: ${types}`);
+
+  // (b) 목표를 채우면 남은 횟수와 상관없이 바로 성공
+  let st = goalState(three, [{ type: 'color', color: 0, count: 3 }]);
+  let res = M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (!res.ok || !st.over || st.result !== 'win' || st.moves !== 14) fail(`색 목표 3개: over=${st.over} result=${st.result} moves=${st.moves}`);
+  if (st.cleared[0] < 3) fail('지운 빨강 보석 수를 안 셈');
+  st = goalState(three, [{ type: 'score', target: 30 }]);
+  M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (st.result !== 'win') fail('점수 목표 30점 바로 성공 안 됨');
+  st = goalState([[7, 0, 5], [7, 1, 5], [7, 3, 5], [6, 2, 5]], [{ type: 'special', count: 1 }]); // 가로 4 → 특수 1개
+  M.play(st, { r: 6, c: 2 }, { r: 7, c: 2 }, mkRng(2));
+  if (st.made < 1 || st.result !== 'win') fail(`특수 보석 목표: made=${st.made} result=${st.result}`);
+  // 복합 목표: 하나만 채우면 계속, 다 채워야 성공
+  st = goalState(three, [{ type: 'color', color: 0, count: 3 }, { type: 'score', target: 999999 }]);
+  M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (st.over || st.result) fail('복합 목표 중 하나만 채웠는데 끝남');
+  const gp = M.goalProgress(st);
+  if (!gp[0].done || gp[1].done || gp[1].need !== 999999) fail('목표 진행도 계산 이상');
+  // (c) 횟수를 다 쓰면 실패
+  st = goalState(three, [{ type: 'score', target: 999999 }], 1);
+  M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (!st.over || st.result !== 'lose') fail(`횟수를 다 써도 실패가 아님: ${st.result}`);
+  if (M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, mkRng(1)).ok) fail('끝난 스테이지에서 움직여짐');
+  // 목표 없는 판(예전 방식)은 결과 없음
+  const free = M.createGame(mkRng(4));
+  if (free.goals !== null || free.moves !== M.MOVES || free.colors !== M.COLORS) fail('목표 없는 판 기본값이 바뀜');
+
+  // (d) 스테이지 설정대로 판 만들기 (색 수 제한 포함)
+  for (const x of S3.STAGES) {
+    const g = M.createGame(mkRng(x.id), x);
+    if (g.moves !== x.moves || g.colors !== x.colors || g.board.flat().some(c => c.c >= x.colors) || M.findRuns(g.board).length || !M.findMove(g.board)) fail(`스테이지 ${x.id} 시작 판 이상`);
+  }
+  // 5색 판에서는 새로 내려오는 보석도 5색 안
+  st = M.createGame(mkRng(9), S3.byId(1));
+  const rng9 = mkRng(10);
+  for (let i = 0; i < 10 && !st.over; i++) { const mv = M.findMove(st.board); M.play(st, mv[0], mv[1], rng9); }
+  if (st.board.flat().some(c => c.c >= 5)) fail('5색 스테이지에 6번째 색 보석이 나옴');
+
+  // (e) 별 / 해금 / 최고 점수
+  const s1 = S3.byId(1);
+  if (S3.starsFor(s1, false, 99999) !== 0 || S3.starsFor(s1, true, 0) !== 1 || S3.starsFor(s1, true, s1.stars[0]) !== 2 || S3.starsFor(s1, true, s1.stars[1]) !== 3) fail('별 계산');
+  let p = S3.newProgress();
+  p = S3.applyResult(p, 1, false, 500);
+  if (p.unlocked !== 1 || p.stars[1]) fail('실패했는데 해금/별');
+  p = S3.applyResult(p, 1, true, s1.stars[1]);
+  if (p.unlocked !== 2 || p.stars[1] !== 3 || p.best[1] !== s1.stars[1]) fail('성공 반영');
+  p = S3.applyResult(p, 1, true, 10);
+  if (p.stars[1] !== 3 || p.best[1] !== s1.stars[1]) fail('더 낮은 기록으로 별/최고 점수가 줄어듦');
+  p = S3.applyResult(p, 10, true, 1);
+  if (p.unlocked !== 10) fail('마지막 스테이지를 깨도 스테이지 수를 넘으면 안 됨');
+  if (S3.totalStars(p) !== 4) fail(`모은 별 합계 ${S3.totalStars(p)}`);
+
+  // (f) 저장 정리: v0.1 자유 플레이 저장 → 하던 판은 버리고 소리 설정은 유지, 최고 점수는 legacyBest 로 보관
+  const oldBoard = M.createGame(mkRng(5));
+  const v1 = { sound: false, best: 1234, games: 7, current: oldBoard };
+  const m1 = S3.migrate(JSON.parse(JSON.stringify(v1)));
+  if (m1.current !== null || m1.sound !== false || m1.legacyBest !== 1234 || m1.v !== 2 || m1.progress.unlocked !== 1 || 'best' in m1) fail(`v0.1 저장 정리 ${JSON.stringify({ c: m1.current, s: m1.sound, lb: m1.legacyBest })}`);
+  const v2 = { v: 2, sound: true, progress: { unlocked: 4, stars: { 1: 3, 2: 1, 3: 2 }, best: { 1: 900 } }, current: { stage: 4, st: M.createGame(mkRng(6), S3.byId(4)) } };
+  const m2 = S3.migrate(JSON.parse(JSON.stringify(v2)));
+  if (m2.progress.unlocked !== 4 || m2.progress.stars[1] !== 3 || !m2.current || m2.current.stage !== 4) fail('v0.2 저장이 정리되며 바뀜');
+  const bad = S3.migrate({ v: 2, progress: { unlocked: 99, stars: null }, current: { stage: 77, st: {} } });
+  if (bad.progress.unlocked !== 10 || bad.current !== null || typeof bad.progress.stars !== 'object') fail('망가진 v0.2 저장 정리');
+  if (S3.migrate(null).progress.unlocked !== 1) fail('저장 없음 → 1스테이지부터');
+  // (g) 이어하기: 목표·진행도·색 수 유지, 끝난 판은 새로
+  const cfg = S3.byId(9);
+  st = M.createGame(mkRng(7), cfg);
+  const r7 = mkRng(8);
+  for (let i = 0; i < 4 && !st.over; i++) { const mv = M.findMove(st.board); M.play(st, mv[0], mv[1], r7); }
+  const back = M.restore(JSON.parse(JSON.stringify(st)), r7, cfg);
+  if (JSON.stringify(back.goals) !== JSON.stringify(cfg.goals) || back.cleared.join() !== st.cleared.join() || back.made !== st.made || back.colors !== 6 || back.moves !== st.moves || back.score !== st.score) fail('이어하기에서 목표/진행도가 바뀜');
+  const ended = JSON.parse(JSON.stringify(st)); ended.over = true; ended.moves = 0;
+  const fresh = M.restore(ended, r7, cfg);
+  if (fresh.over || fresh.moves !== cfg.moves || fresh.score !== 0) fail('끝난 판을 이어하기로 불러옴');
+
+  // (h) 난이도: 한 수 앞을 보는 자동 플레이어가 모든 스테이지를 깰 수 있는지 (스테이지당 15판)
+  function smartPlay(cfg, rng) {
+    const s = M.createGame(rng, cfg);
+    let guard = 0;
+    while (!s.over && guard++ < 60) {
+      let best = -Infinity, pick = null;
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) for (const [dr, dc] of [[0, 1], [1, 0]]) {
+        if (r + dr >= N || c + dc >= N) continue;
+        const copy = JSON.parse(JSON.stringify(s));
+        const a = { r, c }, b = { r: r + dr, c: c + dc };
+        if (!M.play(copy, a, b, mkRng(guard + 1)).ok) continue;
+        const v = M.goalProgress(copy).reduce((t, g) => t + (g.done ? 1.2 : g.have / g.need), 0) * 1000 + copy.score * 0.01;
+        if (v > best) { best = v; pick = [a, b]; }
+      }
+      if (!pick) break;
+      M.play(s, pick[0], pick[1], rng);
+    }
+    return s.result === 'win';
+  }
+  const rates = [];
+  for (const x of S3.STAGES) {
+    const rng = mkRng(1000 + x.id);
+    let w = 0;
+    for (let i = 0; i < 15; i++) if (smartPlay(x, rng)) w++;
+    rates.push(Math.round(100 * w / 15));
+  }
+  console.log(`  한 수 앞 자동 플레이 클리어율(%): ${rates.map((r, i) => `${i + 1}:${r}`).join(' ')}`);
+  if (rates[0] < 90) fail(`1스테이지가 너무 어려움 (${rates[0]}%)`);
+  rates.forEach((r, i) => { if (r < 30) fail(`스테이지 ${i + 1} 클리어율 ${r}% (너무 어려움)`); });
+}
+
 console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
 process.exit(failures ? 1 : 0);

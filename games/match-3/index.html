@@ -11,9 +11,9 @@
   <meta name="apple-mobile-web-app-title" content="엄마 게임천국">
   <title>보석 맞추기</title>
   <link rel="manifest" href="../../manifest.webmanifest">
-  <link rel="icon" href="../../icons/icon-192.png?v=19">
-  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=19">
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="icon" href="../../icons/icon-192.png?v=20">
+  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=20">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
   <!-- 보석 그림 (직접 그린 SVG, 색마다 모양도 달라 색을 구별하기 어려워도 알아볼 수 있게) -->
@@ -52,10 +52,12 @@
         <h1>보석 맞추기</h1>
         <p class="sub">같은 보석 3개를 한 줄로 맞춰요</p>
         <button id="btn-continue" class="btn big">이어하기<small id="continue-info"></small></button>
-        <button id="btn-new" class="btn light">새 게임</button>
+        <button id="btn-play" class="btn big">스테이지 1 시작</button>
+        <!-- 스테이지 고르기: 번호 + 별, 잠긴 곳은 자물쇠 -->
+        <div id="stage-grid" class="stage-grid" aria-label="스테이지 고르기"></div>
         <p id="record" class="record"></p>
         <button id="btn-sound-home" class="btn light small">🔊 소리 켜짐</button>
-        <p class="howto">보석을 옆으로 밀어 자리를 바꿔요.<br>한 판에 20번 움직일 수 있어요.<br>4개·5개를 맞추면 특별한 보석이 생겨요!</p>
+        <p class="howto">보석을 옆으로 밀어 자리를 바꿔요.<br>목표를 채우면 성공! 다음 스테이지가 열려요.<br>4개·5개를 맞추면 특별한 보석이 생겨요!</p>
         <p id="app-version" class="version"></p>
       </div>
     </section>
@@ -64,10 +66,12 @@
     <section id="game" class="screen hidden">
       <header class="topbar">
         <button id="btn-home" class="icon-btn" aria-label="보석 맞추기 메뉴">🏠</button>
-        <div class="stat"><span class="label">점수</span><span id="score" class="value">0</span></div>
+        <div class="stat"><span class="label" id="stage-label">스테이지 1</span><span id="score" class="value">0</span></div>
         <div class="stat moves"><span class="label">남은 횟수</span><span id="moves" class="value">20</span></div>
         <button id="btn-sound" class="icon-btn" aria-label="소리">🔊</button>
       </header>
+      <!-- 목표: 남은 개수, 다 채우면 ✓ -->
+      <div id="goals" class="goals" aria-label="목표"></div>
       <div id="stage">
         <div id="board" aria-label="보석 판"></div>
         <div id="combo" class="hidden"></div>
@@ -85,7 +89,8 @@
     </div>
     <div id="toast" class="hidden"></div>
   </div>
-  <script src="logic.js?v=19"></script>
-  <script src="game.js?v=19"></script>
+  <script src="logic.js?v=20"></script>
+  <script src="stages.js?v=20"></script>
+  <script src="game.js?v=20"></script>
 </body>
 </html>

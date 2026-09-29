@@ -2,6 +2,8 @@
 // 8×8 판, 보석 6종. 가로/세로로 같은 보석 3개 이상 → 사라짐 → 위에서 내려옴 → 연쇄.
 // 특수 보석: 4개 한 줄 → 줄 지우기(가로/세로), 가로·세로가 만나는 모양(ㄱ·ㅗ) → 폭탄(3×3),
 //           5개 한 줄 → 무지개(바꾼 보석과 같은 색을 모두 지움).
+// 스테이지: createGame(rng, { moves, colors, goals }) 로 목표를 주면 목표를 모두 채우는 순간 성공(result 'win'),
+//           이동 횟수를 다 쓰면 실패('lose'). 옵션이 없으면 v0.1 처럼 20번 움직이면 끝.
 // 모든 함수는 난수 함수 rng 를 받아 같은 rng 면 같은 결과가 난다.
 (function (root) {
   'use strict';
@@ -27,7 +29,7 @@
         b.push([]);
         for (let c = 0; c < N; c++) {
           let col;
-          do col = Math.floor(rng() * COLORS);
+          do col = Math.floor(rng() * st.colors);
           while ((c >= 2 && b[r][c - 1].c === col && b[r][c - 2].c === col) ||
                  (r >= 2 && b[r - 1][c].c === col && b[r - 2][c].c === col));
           b[r].push(cell(st, col));
@@ -38,11 +40,26 @@
     throw new Error('판을 만들지 못함');
   }
 
-  function createGame(rng) {
-    const st = { v: 1, seq: 1, board: null, score: 0, moves: MOVES, over: false, bestCombo: 0 };
+  // opts: { moves, colors(보석 종류 수, 3~6), goals: [{ type:'score', target } | { type:'color', color, count } | { type:'special', count }] }
+  function createGame(rng, opts) {
+    opts = opts || {};
+    const st = { v: 1, seq: 1, board: null, score: 0, moves: opts.moves || MOVES, over: false, bestCombo: 0,
+      colors: Math.min(COLORS, Math.max(3, opts.colors || COLORS)),
+      goals: opts.goals ? JSON.parse(JSON.stringify(opts.goals)) : null, result: null,
+      cleared: new Array(COLORS).fill(0), made: 0 }; // 지금까지 지운 색별 보석 수, 만든 특수 보석 수
     st.board = freshBoard(st, rng);
     return st;
   }
+
+  // 목표별 진행도: [{ ...목표, have, need, done }]
+  function goalProgress(st) {
+    return (st.goals || []).map(g => {
+      const have = g.type === 'score' ? st.score : g.type === 'color' ? st.cleared[g.color] : st.made;
+      const need = g.type === 'score' ? g.target : g.count;
+      return Object.assign({}, g, { have: Math.min(have, need), need, done: have >= need });
+    });
+  }
+  const goalsDone = st => !!(st.goals && st.goals.length) && goalProgress(st).every(g => g.done);
 
   // ---------- 맞춤 찾기 ----------
   // 가로/세로로 같은 색 3개 이상인 줄 목록: { dir: 'h'|'v', cells: [[r,c],...] }
@@ -140,7 +157,10 @@
     const cleared = [];
     for (const k of clear) {
       const r = Math.floor(k / N), c = k % N;
-      if (b[r][c]) cleared.push({ id: b[r][c].id, r, c, color: b[r][c].c, s: b[r][c].s });
+      if (b[r][c]) {
+        cleared.push({ id: b[r][c].id, r, c, color: b[r][c].c, s: b[r][c].s });
+        if (st.cleared && b[r][c].c >= 0) st.cleared[b[r][c].c]++;
+      }
       b[r][c] = null;
     }
     const specials = [];
@@ -148,6 +168,7 @@
       const x = cell(st, m.s === 'rainbow' ? -1 : m.color, m.s);
       b[m.r][m.c] = x;
       specials.push({ id: x.id, r: m.r, c: m.c, color: x.c, s: x.s });
+      st.made = (st.made || 0) + 1;
     }
     const points = cleared.length * CELL_PTS * combo + made.reduce((a, m) => a + SPECIAL_PTS[m.s], 0);
     st.score += points;
@@ -167,7 +188,7 @@
       }
       const k = w + 1; // 새로 채울 칸 수 (0 ~ w)
       for (let r = w; r >= 0; r--) {
-        const x = cell(st, Math.floor(rng() * COLORS));
+        const x = cell(st, Math.floor(rng() * (st.colors || COLORS)));
         b[r][c] = x;
         spawns.push({ id: x.id, c, r, fromR: r - k, color: x.c });
       }
@@ -228,7 +249,9 @@
     }
     st.moves--;
     if (!findMove(st.board)) steps.push(shuffle(st, rng));
-    if (st.moves <= 0) st.over = true;
+    // 목표가 있으면: 다 채우면 남은 횟수와 상관없이 바로 성공, 횟수를 다 쓰면 실패
+    if (st.goals && goalsDone(st)) { st.over = true; st.result = 'win'; }
+    else if (st.moves <= 0) { st.over = true; if (st.goals) st.result = 'lose'; }
     return { ok: true, steps };
   }
 
@@ -264,21 +287,26 @@
   }
 
   // 저장본에서 이어하기 (망가진 저장은 새 판)
-  function restore(saved, rng) {
+  // opts: 저장이 망가졌을 때 새로 만들 판의 설정 (스테이지 설정)
+  function restore(saved, rng, opts) {
     try {
       const ok = saved && Array.isArray(saved.board) && saved.board.length === N &&
         saved.board.every(row => Array.isArray(row) && row.length === N && row.every(x => x && Number.isInteger(x.id) && x.c >= -1 && x.c < COLORS));
-      if (!ok) return createGame(rng);
+      if (!ok) return createGame(rng, opts);
       const st = JSON.parse(JSON.stringify(saved));
       st.seq = Math.max(st.seq | 0, ...st.board.flat().map(x => x.id + 1));
-      st.moves = Math.max(0, Math.min(MOVES, st.moves | 0));
+      st.colors = Math.min(COLORS, Math.max(3, st.colors | 0 || COLORS));
+      st.moves = Math.max(0, Math.min(99, st.moves | 0));
+      if (!Array.isArray(st.cleared) || st.cleared.length !== COLORS) st.cleared = new Array(COLORS).fill(0);
+      st.made = st.made | 0;
+      if (st.over || st.moves <= 0) return createGame(rng, opts); // 끝난 판은 이어할 수 없음
       st.score = Math.max(0, st.score | 0);
       if (findRuns(st.board).length || !findMove(st.board)) shuffle(st, rng);
       return st;
-    } catch (e) { return createGame(rng); }
+    } catch (e) { return createGame(rng, opts); }
   }
 
-  const api = { N, COLORS, MOVES, CELL_PTS, SPECIAL_PTS, createGame, findRuns, findMove, play, shuffle, restore, adjacent };
+  const api = { N, COLORS, MOVES, CELL_PTS, SPECIAL_PTS, createGame, findRuns, findMove, play, shuffle, restore, adjacent, goalProgress, goalsDone };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.M3 = api;
 })(typeof window !== 'undefined' ? window : this);

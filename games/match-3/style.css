@@ -141,3 +141,44 @@ h1 { margin: 0; font-size: 40px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
   background: rgba(255, 255, 255, .95); color: var(--ink); font-size: 22px; font-weight: 800; text-align: center; white-space: pre-line;
   padding: 12px 22px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
 }
+
+/* ---------- 스테이지 (v0.2) ---------- */
+.stage-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: min(320px, 86vw); }
+.stage-btn {
+  aspect-ratio: 1; border-radius: 16px; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #fff; color: var(--ink); box-shadow: 0 4px 0 rgba(0, 0, 0, .3); font-weight: 900; font-size: 22px; line-height: 1;
+}
+.stage-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, .3); }
+.stage-btn .st { font-size: 11px; letter-spacing: -1px; margin-top: 3px; color: #f59e0b; }
+.stage-btn .st .off { color: #d4d0dc; }
+.stage-btn.next { background: var(--accent); color: #fff; box-shadow: 0 4px 0 var(--accent-dark); animation: nextpulse 1.2s ease-in-out infinite; }
+.stage-btn.next .st .off { color: rgba(255, 255, 255, .5); }
+@keyframes nextpulse { 50% { transform: scale(1.07); } }
+.stage-btn.locked { background: rgba(255, 255, 255, .15); color: rgba(255, 255, 255, .55); box-shadow: none; font-size: 18px; }
+.goals { flex: none; display: flex; justify-content: center; gap: 6px; padding: 0 10px 4px; flex-wrap: wrap; }
+.goal {
+  display: flex; align-items: center; gap: 5px; padding: 4px 10px 4px 6px; border-radius: 14px;
+  background: rgba(255, 255, 255, .14); font-size: 17px; font-weight: 800; min-height: 38px;
+}
+.goal svg, .goal .gi { width: 28px; height: 28px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.goal.done { background: rgba(74, 222, 128, .28); }
+.goal.done .count::after { content: ' ✓'; color: #86efac; }
+.goal.bump { animation: bump .25s ease-out; }
+.stars-line { letter-spacing: 1px; }
+.stars-line .on { color: #facc15; }
+.stars-line .off { color: rgba(255, 255, 255, .35); }
+.modal .big-stars { font-size: 46px; letter-spacing: 6px; line-height: 1.1; margin: 2px 0 6px; }
+.modal .big-stars .on { color: #f59e0b; display: inline-block; animation: starpop .4s cubic-bezier(.3, 1.6, .5, 1) both; }
+.modal .big-stars .off { color: #ddd; }
+@keyframes starpop { from { transform: scale(0) rotate(-40deg); } }
+.modal .goal-list { text-align: left; display: inline-block; margin: 6px 0 0; padding: 0; list-style: none; font-size: 18px; }
+.modal .goal-list li { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.modal .goal-list svg, .modal .goal-list .gi { width: 30px; height: 30px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+.modal .moves-note { font-size: 17px; color: #666; margin-top: 8px; }
+@media (max-height: 700px) {
+  .stage-grid { gap: 6px; width: min(300px, 84vw); }
+  .stage-btn { font-size: 20px; border-radius: 14px; }
+  .home-inner .btn.big { font-size: 24px; padding: 10px 28px; }
+  .logo svg { width: 38px; height: 38px; }
+  .goal { min-height: 34px; font-size: 16px; }
+}
