@@ -236,7 +236,7 @@ h1 { margin: 0; font-size: 40px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 }
 .tip.below { transform: translate(-50%, 0); }
 @keyframes tipin { from { opacity: 0; } }
-/* 아래 줄: 받을 별 + 게이지 + 끝내기 */
+/* 아래 줄: 받을 별 + 게이지 */
 .bottom { flex: none; display: flex; align-items: center; gap: 8px; margin: 4px 12px 10px; min-height: 44px; }
 .gauge-stars { flex: none; font-size: 20px; letter-spacing: -1px; }
 .gauge-stars .on { color: #facc15; }
@@ -248,10 +248,5 @@ h1 { margin: 0; font-size: 40px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 .gauge .mk small { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font-size: 11px; line-height: 1.2; color: rgba(255, 255, 255, .65); font-weight: 700; white-space: nowrap; }
 .gauge .mk.on { background: #facc15; }
 .gauge .mk.on b { color: #facc15; }
-.finish {
-  flex: none; min-height: 44px; padding: 0 12px; border-radius: 14px; font-size: 16px; font-weight: 800; color: var(--ink);
-  background: #fff; box-shadow: 0 4px 0 rgba(0, 0, 0, .3); animation: tipin .3s ease-out;
-}
-.finish:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, .3); }
 /* 터지거나 모여드는 특수 보석의 표시(줄 무늬·폭탄 빛)도 함께 사라지게 */
 .gem.pop .mark, .gem.gather .mark { animation: none; opacity: 0; transition: opacity .1s; }

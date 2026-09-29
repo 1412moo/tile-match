@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 21; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 22; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'match-3.save.v1';
   const M = window.M3;
   const S3 = window.M3S; // 스테이지 데이터 (stages.js)
@@ -156,8 +156,11 @@
 
   let shownScore = -1, shownMoves = -1;
   let view = null; // 화면에 보이는 진행도 { score, cleared[], made } - 연쇄 단계마다 늘어남
-  let goalCelebrated = false; // 이번 판에서 '목표 달성!' 연출을 했는지 (연쇄 도중 채운 순간)
-  let goalAsked = false;      // 목표 달성 뒤 '계속하기 / 여기서 끝내기' 를 물어봤는지
+  let goalCelebrated = false; // 이번 판에서 '클리어!' 연출을 했는지 (별 게이지 ★1)
+  let movesView = null;       // 화면에 보일 남은 횟수 (엔드 보너스에서 하나씩 줄어듦). null 이면 st.moves
+  let bonusRunning = false;   // 엔드 보너스 연출 중 (누르면 빨리 감기)
+  let speed = 1;              // 연출 속도 (엔드 보너스 중 누르면 빨라짐)
+  const wait = ms => sleep(ms / speed);
   const syncView = () => { view = { score: st.score, cleared: st.cleared.slice(), made: st.made }; };
   const iconHTML = g => (g.type === 'color' ? `<svg viewBox="0 0 100 100"><use href="#gem${g.color}"/></svg>`
     : `<span class="gi">${g.type === 'score' ? '🎯' : '✨'}</span>`);
@@ -173,11 +176,12 @@
       if (shownScore >= 0) { s.classList.remove('bump'); void s.offsetWidth; s.classList.add('bump'); }
       shownScore = view.score;
     }
-    if (st.moves !== shownMoves) {
-      m.textContent = st.moves;
-      shownMoves = st.moves;
+    const moves = movesView != null ? movesView : st.moves;
+    if (moves !== shownMoves) {
+      m.textContent = moves;
+      shownMoves = moves;
     }
-    m.parentElement.classList.toggle('low', st.moves <= 3);
+    m.parentElement.classList.toggle('low', moves <= 3 && !st.over);
     // 목표: 색·특수는 남은 개수, 점수는 지금/목표
     stage.goals.forEach((g, i) => {
       const el = $(`#goals .goal[data-i="${i}"]`);
@@ -204,7 +208,6 @@
     m2.classList.toggle('on', view.score >= s2); m3.classList.toggle('on', view.score >= s3);
     m2.querySelector('small').textContent = s2.toLocaleString('ko-KR');
     m3.querySelector('small').textContent = s3.toLocaleString('ko-KR');
-    $('#btn-finish').classList.toggle('hidden', !(st.goalMet && !st.over && goalAsked));
   }
 
   // ---------------- 효과 ----------------
@@ -298,7 +301,7 @@
   function celebrateGoal() {
     goalCelebrated = true;
     sfx.goal();
-    showBanner('🎯 목표 달성!', 'goal', 1100);
+    showBanner('🎉 클리어!', 'goal', 1100);
     const g = $('#goals');
     g.classList.remove('win'); void g.offsetWidth; g.classList.add('win');
   }
@@ -306,18 +309,42 @@
   // 엔진이 돌려준 단계(바꾸기/지우기/채우기/섞기)를 차례로 보여 준다
   async function runSteps(steps) {
     for (const step of steps) {
-      if (step.kind === 'convert') {
+      if (step.kind === 'bonus') {
+        // 클리어! → 엔드 보너스 시작 (이제부터 누르면 빨리 감기)
+        movesView = step.moves;
+        updateHud();
+        celebrateGoal();
+        bonusRunning = true;
+        speed = 1.3;
+        await wait(1100);
+      } else if (step.kind === 'bonusConvert') {
+        // 남은 횟수 1번 → 일반 보석 하나가 줄 보석으로 (횟수가 하나씩 줄어듦)
+        showBanner('남은 횟수 보너스!', 'combo', 900);
+        await wait(350);
+        for (let i = 0; i < step.cells.length; i++) {
+          const x = step.cells[i];
+          morph(x.id, x.s, x.color);
+          sparks(x.r, x.c, '#fff', 3);
+          sfx.convert(i);
+          movesView = Math.max(0, movesView - 1);
+          updateHud();
+          await wait(140);
+        }
+        movesView = 0;
+        updateHud();
+        await wait(250);
+      } else if (step.kind === 'convert') {
         // 무지개+줄/폭탄: 그 색 보석이 하나씩 특수 보석으로 바뀜 (합쳐서 0.5초 안)
         showBanner(COMBO_LABEL[step.s === 'bomb' ? 'rbbomb' : 'rbline'], 'combo', 900);
         const gap = Math.min(30, 480 / Math.max(1, step.cells.length));
         const far = x => Math.abs(x.r - step.r) + Math.abs(x.c - step.c);
         const order = step.cells.slice().sort((a, b) => far(a) - far(b));
         for (let i = 0; i < order.length; i++) {
-          morph(order[i].id, step.s, step.color);
+          morph(order[i].id, order[i].s || step.s, step.color); // 무지개+줄: 가로/세로 무작위
           if (i % 2 === 0) sfx.convert(i);
-          await sleep(gap);
+          await wait(gap);
         }
-        await sleep(220);
+        await wait(220);
       } else if (step.kind === 'clear') {
         const fx = step.fx;
         const combo = fx && COMBO_LABEL[fx.type];
@@ -384,7 +411,7 @@
         const big = combo || step.cleared.length >= 20;
         floatText((sx / n + 0.5) * cell, (sy / n + 0.5) * cell, `+${step.points.toLocaleString('ko-KR')}${step.combo >= 3 ? ' ×' + step.combo : ''}`, big ? 'big' : '', tint);
         if (step.specials.length) {
-          await sleep(140);
+          await wait(140);
           for (const x of step.specials) {
             const el = makeEl(x, x.r, x.c);
             el.classList.add('appear');
@@ -394,41 +421,39 @@
           if (kinds.includes('rainbow')) sfx.makeRainbow();
           else if (kinds.includes('bomb')) sfx.makeBomb();
           else sfx.makeLine();
-          await sleep(Math.max(60, maxDelay + 200 - 140));
-        } else await sleep(maxDelay + 200);
+          await wait(Math.max(60, maxDelay + 200 - 140));
+        } else await wait(maxDelay + 200);
         if (view) {
           view.score += step.points;
           step.cleared.forEach(x => { if (x.color >= 0) view.cleared[x.color]++; });
           view.made += step.specials.length;
         }
         updateHud();
-        // 연쇄 도중 목표를 다 채운 순간
-        if (!goalCelebrated && stage && stage.goals.length && M.goalProgress(Object.assign({}, st, { score: view.score, cleared: view.cleared, made: view.made })).every(g => g.done)) celebrateGoal();
-        await sleep(40);
+        await wait(40);
       } else if (step.kind === 'fall') {
         let longest = 0;
         for (const m of step.moves) {
           const el = els.get(m.id);
           const dur = 90 + 50 * (m.r - m.fromR);
-          if (el) place(el, m.r, m.c, dur, 'cubic-bezier(.45,0,.6,1.3)');
+          if (el) place(el, m.r, m.c, dur / speed, 'cubic-bezier(.45,0,.6,1.3)');
           longest = Math.max(longest, dur);
         }
         const fresh = step.spawns.map(sp => ({ sp, el: makeEl({ id: sp.id, c: sp.color, s: null }, sp.fromR, sp.c) }));
         void board.offsetWidth; // 위에서 시작한 자리를 먼저 그리고
         for (const { sp, el } of fresh) {
           const dur = 90 + 50 * (sp.r - sp.fromR);
-          place(el, sp.r, sp.c, dur, 'cubic-bezier(.45,0,.6,1.3)');
+          place(el, sp.r, sp.c, dur / speed, 'cubic-bezier(.45,0,.6,1.3)');
           longest = Math.max(longest, dur);
         }
-        await sleep(longest + 20);
+        await wait(longest + 20);
         sfx.land();
       } else if (step.kind === 'shuffle') {
         toast('더 움직일 수 없어서\n보석을 섞을게요');
         sfx.shuffle();
-        await sleep(500);
+        await wait(500);
         if (step.fresh) renderAll();
         else for (const x of step.cells) { const el = els.get(x.id); if (el) place(el, x.r, x.c, 380); }
-        await sleep(420);
+        await wait(420);
       }
     }
   }
@@ -445,6 +470,7 @@
     sel = p;
     if (sel) elAt(sel.r, sel.c).classList.add('sel');
   }
+  $('#stage').addEventListener('pointerdown', () => { if (bonusRunning) speed = 4; });
   board.addEventListener('pointerdown', e => {
     if (!st || busy || st.over) return;
     sfx.unlock();
@@ -523,46 +549,25 @@
     await afterMove(res);
   }
 
-  // 한 수를 보여 준 뒤: 끝났으면 결과, 목표를 처음 채웠으면 '계속하기 / 여기서 끝내기'
+  // 한 수를 보여 준 뒤: 끝났으면(클리어 → 엔드 보너스 / 실패) 결과
+  // 결과(별·해금·최고 점수)는 연출 전에 바로 저장 → 엔드 보너스 중 앱을 닫아도 클리어가 남음
   async function afterMove(res) {
     const game = st;
+    const bonus = res.steps.find(x => x.kind === 'bonus');
+    movesView = bonus ? bonus.moves : null;
+    if (st.over) recordResult();
+    speed = 1;
     await runSteps(res.steps);
+    bonusRunning = false;
+    speed = 1;
+    movesView = null;
     if (st !== game) return;
     syncView(); // 화면 진행도를 실제 값과 맞춤
-    if (st.goalMet && !goalCelebrated) celebrateGoal();
     updateHud();
-    if (st.over) { gameOver(); busy = false; return; }
+    if (st.over) { showResult(); busy = false; return; }
     saveGame();
-    if (st.goalMet && !goalAsked) {
-      // '목표 달성!' 글씨를 잠깐 보여 준 뒤 물어봄 (그 사이 보석을 못 움직이게 busy 유지)
-      goalAsked = true;
-      setTimeout(() => { if (st === game) { busy = false; askGoal(); } }, 450);
-      return;
-    }
     busy = false;
     scheduleHint();
-  }
-  function askGoal() {
-    if (!st || st.over || gameEl.classList.contains('hidden')) return;
-    const [s2, s3] = stage.stars;
-    showModal({
-      emoji: '🎯', title: '목표 달성!',
-      body: `지금 끝내도 <b>★1</b> 확정!<br>남은 <b>${st.moves}번</b>으로 점수를 더 모으면<br>★★ ${s2.toLocaleString('ko-KR')}점 · ★★★ ${s3.toLocaleString('ko-KR')}점`,
-      buttons: [
-        { label: '계속하기', onClick: () => { hideModal(); updateHud(); scheduleHint(); } },
-        { label: '여기서 끝내기', light: true, onClick: finishNow },
-      ],
-    });
-  }
-  // 목표를 채운 뒤 '여기서 끝내기': 지금 점수로 별 계산
-  function finishNow() {
-    if (!st || busy || !M.finish(st)) return;
-    hideModal();
-    clearHint();
-    select(null);
-    syncView();
-    updateHud();
-    gameOver();
   }
 
   // 한동안 가만히 있으면 움직일 수 있는 두 보석을 살짝 흔들어 알려 줌
@@ -615,14 +620,19 @@
       return `<li>${iconHTML(g)}<span>${S3.goalText(g)}${tail}</span></li>`;
     }).join('') + '</ul>';
   }
-  function gameOver() {
+  let lastResult = null;
+  function recordResult() {
     const won = st.result === 'win';
     const score = st.score;
     const before = save.progress.stars[stage.id] || 0;
     save.progress = S3.applyResult(save.progress, stage.id, won, score);
     save.current = null;
     persist();
-    const stars = S3.starsFor(stage, won, score);
+    lastResult = { won, score, before, stars: S3.starsFor(stage, won, score) };
+  }
+  function showResult() {
+    if (!lastResult) recordResult();
+    const { won, score, before, stars } = lastResult;
     const next = S3.byId(stage.id + 1);
     (won ? sfx.end : sfx.bad)();
     setTimeout(() => {
@@ -691,7 +701,7 @@
     };
     showModal({
       emoji: '', title: `스테이지 ${id}`,
-      body: `<div><b>목표</b></div>${goalListHTML(x.goals, false)}<div class="moves-note">${x.moves}번 안에 해내면 성공!<br>남은 횟수로 점수를 더 모으면 별이 늘어요</div>`,
+      body: `<div><b>목표</b></div>${goalListHTML(x.goals, false)}<div class="moves-note">${x.moves}번 안에 해내면 성공!<br>빨리 깰수록 남은 횟수가 보너스 점수가 돼요</div>`,
       buttons: [
         { label: '시작', onClick: start },
         { label: '닫기', light: true, onClick: hideModal },
@@ -708,7 +718,7 @@
     st = saved ? M.restore(saved, Math.random, opts) : M.createGame(Math.random, opts);
     busy = false; sel = null; drag = null;
     shownScore = -1; shownMoves = -1;
-    goalCelebrated = goalAsked = !!st.goalMet; // 이어하기: 이미 목표를 채운 판이면 다시 묻지 않음
+    goalCelebrated = false; movesView = null; bonusRunning = false; speed = 1; lastResult = null;
     $('#goals').classList.remove('win');
     syncView();
     showScreen(gameEl);
@@ -718,6 +728,12 @@
     renderAll();
     updateHud();
     updateSoundButtons();
+    // v0.3 에서 목표를 채운 채 '계속하기' 하던 판: 바로 클리어 + 엔드 보너스
+    if (saved && !st.over && st.goals && M.goalsDone(st)) {
+      busy = true;
+      afterMove(M.settle(st, Math.random));
+      return;
+    }
     saveGame();
     scheduleHint();
   }
@@ -747,7 +763,6 @@
   });
   $('#btn-home').addEventListener('click', goHome);
   $('#btn-sound').addEventListener('click', toggleSound);
-  $('#btn-finish').addEventListener('click', () => { sfx.unlock(); finishNow(); });
   $('#btn-sound-home').addEventListener('click', toggleSound);
   $('#btn-hub').addEventListener('click', () => {
     let fromHub = false;
@@ -765,7 +780,7 @@
   showHome();
 
   // 확인용 (개발자 도구에서 사용)
-  window.__m3 = { get st() { return st; }, get stage() { return stage; }, trySwap, tryActivate, finishNow, get busy() { return busy; } };
+  window.__m3 = { get st() { return st; }, get stage() { return stage; }, trySwap, tryActivate, get busy() { return busy; } };
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('../../sw.js', { scope: '../../' }).catch(() => { });

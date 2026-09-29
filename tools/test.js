@@ -768,11 +768,11 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
     if (res.ok || JSON.stringify(st.board) !== before || st.moves !== M.MOVES || st.score) fail('맞지 않는 바꾸기를 되돌리지 않음');
     if (M.play(st, { r: 0, c: 0 }, { r: 2, c: 0 }, mkRng(1)).ok) fail('붙어 있지 않은 칸끼리 바뀜');
   }
-  // (e) 특수 보석 만들기: 가로 4 → 가로줄, 세로 4 → 세로줄, 5 → 무지개, ㄱ 모양 → 폭탄 (바꾼 자리에 생김)
+  // (e) 특수 보석 만들기: 4개 → 줄 보석(방향 = 내가 민 방향: 세로로 밀면 세로줄, 가로로 밀면 가로줄. 한 줄 4개는 늘 줄과 엇갈린 방향으로 밀어야 생기므로 연쇄 규칙과 같음), 5 → 무지개, ㄱ 모양 → 폭탄 (바꾼 자리에 생김)
   {
     const cases = [
-      ['가로 4', [[7, 0, X], [7, 1, X], [7, 3, X], [6, 2, X]], [6, 2], [7, 2], 'row'],
-      ['세로 4', [[0, 7, Y], [1, 7, Y], [3, 7, Y], [2, 6, Y]], [2, 6], [2, 7], 'col'],
+      ['가로 4 (세로로 밀어 만듦)', [[7, 0, X], [7, 1, X], [7, 3, X], [6, 2, X]], [6, 2], [7, 2], 'col'],
+      ['세로 4 (가로로 밀어 만듦)', [[0, 7, Y], [1, 7, Y], [3, 7, Y], [2, 6, Y]], [2, 6], [2, 7], 'row'],
       ['5개', [[7, 0, X], [7, 1, X], [7, 3, X], [7, 4, X], [6, 2, X]], [6, 2], [7, 2], 'rainbow'],
       ['ㄱ 모양', [[7, 0, X], [7, 1, X], [6, 2, X], [5, 2, X], [7, 3, X]], [7, 3], [7, 2], 'bomb'],
     ];
@@ -911,6 +911,13 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
       if (cl.bonus !== M.COMBO_PTS[type] || cl.points !== cl.cleared.length * M.CELL_PTS + M.COMBO_PTS[type]) fail(`${name} 점수 ${cl.points}`);
       after(st, name);
     }
+    // 연쇄로 저절로 생긴 줄 보석: 가로 4개 → 세로줄. 3번 세로줄 5~7행 초록 3개를 지우면 (2,3) 이 (5,3) 으로 내려와 5번 줄 1~4칸이 빨강 4개
+    st = mkState([[5, 1, 0], [5, 2, 0], [5, 4, 0], [2, 3, 0], [5, 3, 3], [6, 3, 3], [7, 2, 3]]);
+    if (M.findRuns(st.board).length) fail('연쇄 줄 방향: 준비 판에 이미 맞춤');
+    res = M.play(st, { r: 7, c: 2 }, { r: 7, c: 3 }, mkRng(61));
+    const cc = res.ok && res.steps.filter(t => t.kind === 'clear')[1];
+    const made5 = cc && cc.combo === 2 && cc.specials.find(x => x.r === 5);
+    if (!made5 || made5.s !== 'col') fail(`연쇄로 생긴 가로 4 → 세로줄 이어야 함: ${JSON.stringify(made5)}`);
     // 판 가장자리에서는 잘림: 폭탄+폭탄 (0,1)→(0,0) → 3×3
     st = mkState([[0, 0, 0, 'bomb'], [0, 1, 1, 'bomb']]);
     cl = firstClear(M.play(st, { r: 0, c: 1 }, { r: 0, c: 0 }, mkRng(35)));
@@ -919,20 +926,22 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
     st = mkState([[4, 4, 0, 'row'], [4, 5, 1, 'col'], [0, 5, 2, 'row']]);
     cl = firstClear(M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(36)));
     if (!cl || !rowK(0).every(k => cellsOf(cl).has(k))) fail('조합 범위 안 특수 보석 연쇄');
-    // 무지개+세로줄: 그 색(3) 보석이 모두 세로줄로 바뀌고(교환한 줄 방향 그대로) 터짐. 기본 무늬에서 3번 색은 홀수 세로줄에만 있음
+    // 무지개+줄: 그 색(3) 보석이 모두 줄 보석(가로/세로 무작위, Candy Crush 계열)으로 바뀌고 모두 터짐
     st = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'col']]);
     const n3 = st.board.flat().filter(x => !x.s && x.c === 3).length;
     res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(37));
     const cv = res.ok && res.steps.find(t => t.kind === 'convert');
     cl = res.ok && firstClear(res);
-    if (!cv || cv.s !== 'col' || cv.cells.length !== n3) fail(`무지개+세로줄 변환 ${cv && cv.s} ${cv && cv.cells.length}/${n3}`);
-    if (!cl || cl.fx.type !== 'rbline' || !sameSet(cellsOf(cl), new Set([1, 3, 4, 5, 7].flatMap(colK)))) fail(`무지개+세로줄 범위 ${cl && cl.cleared.length}칸 (기대 40)`);
-    after(st, '무지개+세로줄');
-    // 무지개+가로줄: 가로로 바뀜
-    st = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'row']]);
-    res = M.play(st, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(38));
-    const cv2 = res.steps.find(t => t.kind === 'convert');
-    if (!cv2 || cv2.s !== 'row' || firstClear(res).fx.type !== 'rbline') fail('무지개+가로줄 변환 방향');
+    if (!cv || cv.cells.length !== n3 || cv.cells.some(x => x.s !== 'row' && x.s !== 'col')) fail(`무지개+줄 변환 ${cv && cv.cells.length}/${n3}`);
+    else if (!cl || cl.fx.type !== 'rbline' || !cv.cells.every(x => (x.s === 'row' ? rowK(x.r) : colK(x.c)).every(k => cellsOf(cl).has(k)))) fail('무지개+줄: 바뀐 줄 보석이 모두 터지지 않음');
+    after(st, '무지개+줄');
+    const dirs = new Set();
+    for (let sd = 50; sd < 60; sd++) {
+      const t = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'row']]);
+      const cv2 = M.play(t, { r: 4, c: 4 }, { r: 4, c: 5 }, mkRng(sd)).steps.find(x => x.kind === 'convert');
+      cv2.cells.forEach(x => dirs.add(x.s));
+    }
+    if (!dirs.has('row') || !dirs.has('col')) fail(`무지개+줄 변환 방향이 무작위가 아님: ${[...dirs]}`);
     // 무지개+폭탄: 그 색이 모두 폭탄으로 바뀌고 터짐
     st = mkState([[4, 4, -1, 'rainbow'], [4, 5, 3, 'bomb']]);
     res = M.play(st, { r: 4, c: 5 }, { r: 4, c: 4 }, mkRng(39));
@@ -1007,37 +1016,64 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   if (!types.slice(0, 3).every(t => t === 'score') || !types.slice(3, 6).every(t => t === 'color') ||
       !types.slice(6, 8).every(t => t === 'special') || !types.slice(8).every(t => t.includes('+'))) fail(`스테이지 목표 구성: ${types}`);
 
-  // (b) v0.3: 목표를 채우면 goalMet 만 기록하고 계속 (남은 횟수를 다 쓰거나 '여기서 끝내기' 하면 성공)
+  // (b) v0.4: 목표를 채우는 순간 클리어 → 엔드 보너스 (판의 특수 보석 → 남은 횟수만큼 줄 보석으로 바꿔 모두 터뜨림)
+  const boardOk = (s, name) => { if (s.board.flat().some(x => !x || x.s) || M.findRuns(s.board).length || new Set(s.board.flat().map(x => x.id)).size !== N * N) fail(`${name}: 보너스 뒤 판 상태 이상 (특수 보석/맞춤 남음, id 중복)`); };
   let st = goalState(three, [{ type: 'color', color: 0, count: 3 }]);
-  if (M.finish(st)) fail('목표를 채우기 전에 끝내기가 됨');
   let res = M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (!res.ok || st.over || st.result || !st.goalMet || st.moves !== 14) fail(`색 목표 3개: over=${st.over} result=${st.result} goalMet=${st.goalMet} moves=${st.moves}`);
+  if (!res.ok || !st.over || st.result !== 'win' || !st.goalMet || st.moves !== 0) fail(`색 목표 3개: over=${st.over} result=${st.result} moves=${st.moves}`);
   if (st.cleared[0] < 3) fail('지운 빨강 보석 수를 안 셈');
-  const scoreAtGoal = st.score;
-  const rngB = mkRng(3);
-  for (let i = 0; i < 3; i++) { const mv = M.findMove(st.board); if (!M.play(st, mv[0], mv[1], rngB).ok) fail('목표 달성 뒤 계속 둘 수 없음'); }
-  if (st.over || !st.goalMet || st.moves !== 11 || st.score <= scoreAtGoal) fail('목표 달성 뒤 점수를 더 모으지 못함');
-  if (!M.finish(st) || !st.over || st.result !== 'win' || st.moves !== 11) fail('여기서 끝내기 → 성공');
-  if (M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, mkRng(1)).ok) fail('끝낸 판에서 움직여짐');
-  // 남은 횟수를 다 쓰면 goalMet 이면 성공
-  st = goalState(three, [{ type: 'color', color: 0, count: 3 }], 2);
-  M.play(st, swap3[0], swap3[1], mkRng(1));
-  let mv0 = M.findMove(st.board); M.play(st, mv0[0], mv0[1], mkRng(2));
-  if (!st.over || st.result !== 'win' || st.moves !== 0) fail(`목표 달성 뒤 횟수를 다 쓰면 성공: ${st.result}`);
-  // 마지막 수로 목표를 채워도 성공
+  const kinds = res.steps.map(t => t.kind);
+  const bIdx = kinds.indexOf('bonus'), cIdx = kinds.indexOf('bonusConvert');
+  if (bIdx < 0 || res.steps[bIdx].moves !== 14 || cIdx < bIdx) fail(`엔드 보너스 단계 순서: ${kinds.join(',')}`);
+  const conv = res.steps[cIdx];
+  if (!conv || conv.cells.length !== 14 || conv.cells.some(x => x.s !== 'row' && x.s !== 'col')) fail(`남은 14번 → 줄 보석 14개: ${conv && conv.cells.length}`);
+  const bonusFired = res.steps.slice(cIdx).filter(t => t.kind === 'clear').reduce((a, t) => a + t.triggered.filter(x => x.bonus).length, 0);
+  if (bonusFired !== 14) fail(`보너스 줄 보석이 다 터지지 않음: ${bonusFired}/14`);
+  const sumPts = res.steps.filter(t => t.kind === 'clear').reduce((a, t) => a + t.points, 0);
+  if (sumPts !== st.score) fail(`점수 합 ${sumPts} ≠ 판 점수 ${st.score}`);
+  const expectB = res.steps.filter(t => t.kind === 'clear').reduce((a, t) => a + t.triggered.filter(x => x.bonus).length * M.BONUS_PTS + (t.fx && M.COMBO_PTS[t.fx.type] || 0), 0);
+  if (res.steps.filter(t => t.kind === 'clear').reduce((a, t) => a + t.bonus, 0) !== expectB) fail('보너스 점수 계산');
+  boardOk(st, '엔드 보너스');
+  if (M.play(st, { r: 0, c: 0 }, { r: 0, c: 1 }, mkRng(1)).ok || M.activate(st, { r: 0, c: 0 }, mkRng(1)).ok) fail('클리어한 판에서 움직여짐');
+  // 같은 난수면 같은 결과
+  const again = goalState(three, [{ type: 'color', color: 0, count: 3 }]);
+  M.play(again, swap3[0], swap3[1], mkRng(1));
+  if (JSON.stringify(again) !== JSON.stringify(st)) fail('같은 난수인데 엔드 보너스 결과가 다름');
+  // 남은 횟수가 많을수록 점수가 높음 (같은 판·같은 난수, 횟수만 다름)
+  const at = m => { const t = goalState(three, [{ type: 'color', color: 0, count: 3 }], m); M.play(t, swap3[0], swap3[1], mkRng(1)); return t.score; };
+  if (!(at(1) < at(5) && at(5) < at(15))) fail(`남은 횟수와 점수: ${at(1)} / ${at(5)} / ${at(15)}`);
+  // 판에 있던 특수 보석은 보너스 변환보다 먼저 터짐
+  st = goalState(three.concat([[0, 6, 4, 'bomb']]), [{ type: 'color', color: 0, count: 3 }]);
+  res = M.play(st, swap3[0], swap3[1], mkRng(4));
+  const afterB = res.steps.slice(res.steps.findIndex(t => t.kind === 'bonus') + 1);
+  const firstB = afterB.find(t => t.kind === 'clear');
+  if (!firstB || !firstB.fx || firstB.fx.s !== 'bomb' || firstB.fx.r !== 0 || firstB.fx.c !== 6) fail('판에 남은 특수 보석을 먼저 터뜨리지 않음');
+  boardOk(st, '특수 보석 남은 판');
+  // 마지막 수로 목표를 채우면 변환 없이 클리어
   st = goalState(three, [{ type: 'color', color: 0, count: 3 }], 1);
-  M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (!st.over || st.result !== 'win') fail('마지막 수로 목표 달성 → 성공');
+  res = M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (!st.over || st.result !== 'win' || res.steps.some(t => t.kind === 'bonusConvert') || !res.steps.some(t => t.kind === 'bonus')) fail('마지막 수로 목표 달성 → 변환 없이 클리어');
+  // 일반 보석보다 남은 횟수가 많으면 있는 만큼(64개)만 바꾸고 횟수는 0
+  st = goalState(three, [{ type: 'color', color: 0, count: 3 }], 71);
+  res = M.play(st, swap3[0], swap3[1], mkRng(5));
+  const big = res.steps.find(t => t.kind === 'bonusConvert');
+  if (!big || big.cells.length !== N * N || st.moves !== 0) fail(`줄 보석 변환 수 제한: ${big && big.cells.length}`);
+  boardOk(st, '변환 수 제한');
+  // 점수·특수 목표도 채우는 순간 클리어
   st = goalState(three, [{ type: 'score', target: 30 }]);
   M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (!st.goalMet || st.over) fail('점수 목표 30점 달성 기록');
+  if (!st.over || st.result !== 'win') fail('점수 목표 30점 → 클리어');
   st = goalState([[7, 0, 5], [7, 1, 5], [7, 3, 5], [6, 2, 5]], [{ type: 'special', count: 1 }]); // 가로 4 → 특수 1개
   M.play(st, { r: 6, c: 2 }, { r: 7, c: 2 }, mkRng(2));
-  if (st.made < 1 || !st.goalMet) fail(`특수 보석 목표: made=${st.made} goalMet=${st.goalMet}`);
-  // 복합 목표: 하나만 채우면 goalMet 아님
+  if (st.made < 1 || st.result !== 'win') fail(`특수 보석 목표: made=${st.made} result=${st.result}`);
+  // 실패하면 엔드 보너스 없음
+  st = goalState(three, [{ type: 'score', target: 999999 }], 1);
+  res = M.play(st, swap3[0], swap3[1], mkRng(1));
+  if (st.result !== 'lose' || res.steps.some(t => t.kind === 'bonus')) fail('실패했는데 엔드 보너스');
+  // 복합 목표: 하나만 채우면 계속
   st = goalState(three, [{ type: 'color', color: 0, count: 3 }, { type: 'score', target: 999999 }]);
   M.play(st, swap3[0], swap3[1], mkRng(1));
-  if (st.over || st.result || st.goalMet || M.finish(st)) fail('복합 목표 중 하나만 채웠는데 달성/끝남');
+  if (st.over || st.result || st.goalMet || M.settle(st, mkRng(1)).ok) fail('복합 목표 중 하나만 채웠는데 클리어');
   const gp = M.goalProgress(st);
   if (!gp[0].done || gp[1].done || gp[1].need !== 999999) fail('목표 진행도 계산 이상');
   // (c) 횟수를 다 쓰면 실패
@@ -1092,13 +1128,17 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   for (let i = 0; i < 4 && !st.over; i++) { const mv = M.findMove(st.board); M.play(st, mv[0], mv[1], r7); }
   const back = M.restore(JSON.parse(JSON.stringify(st)), r7, cfg);
   if (JSON.stringify(back.goals) !== JSON.stringify(cfg.goals) || back.cleared.join() !== st.cleared.join() || back.made !== st.made || back.colors !== 6 || back.moves !== st.moves || back.score !== st.score) fail('이어하기에서 목표/진행도가 바뀜');
-  if (back.goalMet !== st.goalMet) fail('이어하기에서 goalMet 이 바뀜');
-  const met = goalState(three, [{ type: 'color', color: 0, count: 3 }]);
-  M.play(met, swap3[0], swap3[1], mkRng(1));
-  const old = JSON.parse(JSON.stringify(met)); delete old.goalMet; // v0.2 저장 모양
-  if (!M.restore(old, mkRng(2), { goals: met.goals }).goalMet) fail('goalMet 없는 저장: 진행도로 달성 계산 안 됨');
+  // v0.3 에서 목표를 채운 채 '계속하기' 하던 판 (over 아님, 횟수 남음) → 이어하면 settle 로 바로 클리어 + 엔드 보너스
+  const met = goalState(three, [{ type: 'color', color: 0, count: 3 }], 9);
+  met.cleared[0] = 5; met.goalMet = true;
+  const back3 = M.restore(JSON.parse(JSON.stringify(met)), mkRng(2), { goals: met.goals });
+  if (back3.over || back3.moves !== 9 || !back3.goalMet) fail('v0.3 목표 채운 저장을 이어하기로 못 불러옴');
+  const sres = M.settle(back3, mkRng(3));
+  const sconv = sres.ok && sres.steps.find(t => t.kind === 'bonusConvert');
+  if (!sres.ok || !back3.over || back3.result !== 'win' || back3.moves !== 0 || !sconv || sconv.cells.length !== 9) fail('v0.3 목표 채운 저장 → settle 클리어 + 보너스 9개');
   const notMet = JSON.parse(JSON.stringify(goalState(three, [{ type: 'color', color: 0, count: 3 }]))); delete notMet.goalMet;
-  if (M.restore(notMet, mkRng(2)).goalMet) fail('목표 안 채운 저장이 달성으로 바뀜');
+  const nm = M.restore(notMet, mkRng(2));
+  if (nm.goalMet || M.settle(nm, mkRng(2)).ok) fail('목표 안 채운 저장이 달성으로 바뀜');
   const ended = JSON.parse(JSON.stringify(st)); ended.over = true; ended.moves = 0;
   const fresh = M.restore(ended, r7, cfg);
   if (fresh.over || fresh.moves !== cfg.moves || fresh.score !== 0) fail('끝난 판을 이어하기로 불러옴');
@@ -1129,7 +1169,7 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
     for (let i = 0; i < 15; i++) if (smartPlay(x, rng)) w++;
     rates.push(Math.round(100 * w / 15));
   }
-  console.log(`  한 수 앞 자동 플레이 클리어율(%, 목표 달성 뒤에도 끝까지): ${rates.map((r, i) => `${i + 1}:${r}`).join(' ')}`);
+  console.log(`  한 수 앞 자동 플레이 클리어율(%): ${rates.map((r, i) => `${i + 1}:${r}`).join(' ')}`);
   if (rates[0] < 90) fail(`1스테이지가 너무 어려움 (${rates[0]}%)`);
   rates.forEach((r, i) => { if (r < 30) fail(`스테이지 ${i + 1} 클리어율 ${r}% (너무 어려움)`); });
 }
