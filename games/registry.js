@@ -8,7 +8,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 22;
+  root.APP_VERSION = 23;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',
@@ -73,6 +73,17 @@
       files: ['', 'index.html', 'style.css', 'logic.js', 'stages.js', 'game.js'],
       summary: s => (s.current && s.current.stage ? `스테이지 ${s.current.stage} 하던 판 있어요`
         : s.progress && s.progress.unlocked > 1 ? `스테이지 ${s.progress.unlocked}까지 열렸어요` : ''),
+    },
+    {
+      id: 'english',
+      name: '영어 탐험대',
+      icon: '🌍',
+      desc: '영어 단어 퀴즈·철자·듣기 게임',
+      path: 'games/english/',
+      ready: true,
+      storageKey: 'english.save.v1',
+      files: ['', 'index.html', 'style.css', 'game.js'],
+      summary: s => (s.xp ? `레벨 ${Math.floor(s.xp / 100) + 1} · 최고 ${s.best || 0}점` : ''),
     },
   ];
 })(typeof self !== 'undefined' ? self : this);

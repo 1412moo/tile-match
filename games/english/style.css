@@ -1,0 +1,44 @@
+:root{--bg:#eef3ff;--card:#fff;--ink:#22284a;--sub:#555e8c;--main:#5b6cff;--ok:#2fbf71;--bad:#ff5d6c;--gold:#e29500}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;justify-content:center;font-size:19px;line-height:1.45}
+/* 글씨 크기: 360×640 에서 다른 게임(보석 맞추기·타일 매치)과 비슷하게 크게 */
+#app{width:100%;max-width:480px;padding:12px 14px calc(16px + env(safe-area-inset-bottom))}
+h1{text-align:center;margin:6px 0 2px;font-size:32px}
+.sub{text-align:center;color:var(--sub);margin-bottom:14px;font-size:18px}
+.card{background:var(--card);border-radius:18px;padding:16px;box-shadow:0 4px 14px #5b6cff22;margin-bottom:12px}
+.stats{display:flex;justify-content:space-around;gap:6px;flex-wrap:wrap;font-weight:bold;font-size:19px}
+.btn{display:block;width:100%;min-height:56px;border:0;border-radius:14px;padding:14px 12px;font-size:22px;font-weight:bold;background:var(--main);color:#fff;cursor:pointer;margin-bottom:10px;transition:transform .1s;font-family:inherit;line-height:1.3;word-break:keep-all}
+.btn:active{transform:scale(.97)}
+.btn.alt{background:#fff;color:var(--main);border:2px solid var(--main)}
+.btn small{display:block;font-weight:normal;opacity:.9;font-size:16px;margin-top:3px}
+.hub-back{border:0;background:#fff;color:var(--main);font-size:18px;font-weight:bold;cursor:pointer;min-height:48px;padding:0 16px;border-radius:14px;box-shadow:0 3px 8px #5b6cff22;font-family:inherit}
+.lv{width:100%;padding:12px;font-size:19px;margin-top:8px;border-radius:10px;font-family:inherit}
+.howto{text-align:center;color:var(--sub);font-size:17px;margin:4px 0 6px}
+.version{text-align:center;color:#8a90b5;font-size:13px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:10px;font-weight:bold;font-size:19px}
+.top .tag{color:var(--gold)}
+.bar{height:10px;background:#dfe5ff;border-radius:6px;overflow:hidden;margin-bottom:12px}
+.bar div{height:100%;background:var(--main);transition:width .3s}
+.q{font-size:40px;text-align:center;font-weight:bold;margin:12px 0 14px;overflow-wrap:anywhere}
+.hint{text-align:center;color:var(--sub);margin-bottom:10px;font-size:19px}
+.hint.small{font-size:16px;margin:-4px 0 10px}
+.opt{background:#f4f6ff;border:2px solid #dfe5ff;color:var(--ink);font-size:24px}
+.opt.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.opt.bad{background:var(--bad);border-color:var(--bad);color:#fff}
+.slots,.tiles{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin:10px 0;min-height:54px}
+.slot,.tile{width:44px;height:54px;border-radius:10px;font-size:28px;font-weight:bold;display:flex;align-items:center;justify-content:center;text-transform:lowercase;font-family:inherit}
+.slot{border:2px dashed #b8c1ff;background:#fff;cursor:pointer}
+.tile{background:var(--main);color:#fff;cursor:pointer;border:0}
+.tile.used{opacity:.25;pointer-events:none}
+.msg{text-align:center;font-size:21px;font-weight:bold;min-height:32px;margin:8px 0;overflow-wrap:anywhere}
+.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
+.speak{font-size:60px;width:96px;height:96px;border-radius:50%;background:#f4f6ff;border:2px solid #dfe5ff;cursor:pointer;display:block;margin:6px auto 10px}
+.speak:active{transform:scale(.95)}
+.big{font-size:64px;text-align:center}
+.result h2{text-align:center;font-size:28px;margin:4px 0 10px}
+.center{text-align:center;margin:6px 0}
+.big-line{font-size:21px}
+.levelup{color:var(--gold);font-size:23px;font-weight:bold}
+.wordlist{list-style:none;padding:0;margin:8px 0 14px;text-align:center;font-size:20px}
+.wordlist li{margin:4px 0}
+.pop{animation:pop .3s}@keyframes pop{50%{transform:scale(1.08)}}
