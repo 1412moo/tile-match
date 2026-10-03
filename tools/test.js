@@ -1174,5 +1174,59 @@ const gsEq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기
   rates.forEach((r, i) => { if (r < 30) fail(`스테이지 ${i + 1} 클리어율 ${r}% (너무 어려움)`); });
 }
 
+console.log('[고스톱 같이 치기] 두 폰이 행동 기록만 주고받아도 같은 판이 되는지 (500판)');
+{
+  const GS = require('../games/gostop/rules.js');
+  const ON = require('../games/gostop/online.js');
+  const mkRng = sd => () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  const norm = s => { const c = JSON.parse(JSON.stringify(s)); delete c.alerted; return JSON.stringify(c); };
+  let bad = 0, rounds = 0, decided = 0;
+  for (let g = 0; g < 500 && bad < 3; g++) {
+    const rng = mkRng(777 + g);
+    const init = GS.newRound(rng, g % 2, 1);
+    const phones = { host: ON.toLocal(init, 'host'), guest: ON.toLocal(init, 'guest') };
+    const log = [];
+    for (let step = 0; step < 200 && phones.host.phase !== 'over'; step++) {
+      // 차례인 폰 = 자기 화면에서 turn 이 0 인 폰. 그 폰이 실제 화면처럼 행동을 만든다
+      const role = phones.host.turn === 0 ? 'host' : 'guest', other = role === 'host' ? 'guest' : 'host';
+      const s = phones[role];
+      let a;
+      if (s.phase === 'gostop') {
+        a = { k: 'decide', go: rng() < 0.4 };
+        GS.decide(s, a.go);
+        decided++;
+      } else {
+        const pick = GS.aiPick(s, rng);
+        if (pick.card !== undefined && GS.isBonus(pick.card)) {
+          a = { k: 'bonus', card: pick.card };
+          GS.play(s, pick.card);
+        } else {
+          const opt = { choice: pick.choice === undefined ? null : pick.choice, shake: rng() < 0.5, bomb: !!pick.bomb };
+          if (pick.dummy) GS.playDummy(s); else GS.play(s, pick.card, opt);
+          const fo = GS.flipOptions(s);
+          const fc = fo ? fo[Math.floor(rng() * 2)] : null;
+          a = { k: 'turn', card: pick.dummy ? null : pick.card, dummy: !!pick.dummy, opt, fc };
+          GS.flip(s, fc);
+          GS.endTurn(s);
+        }
+      }
+      a = JSON.parse(JSON.stringify(a)); // 네트워크(JSON)를 거친 것처럼
+      log.push(a);
+      ON.applyAction(phones[other], a);
+      if (norm(ON.swapState(phones.host)) !== norm(phones.guest)) { bad++; fail(`같이 치기 ${g}판 ${step}번째 행동 뒤 두 폰 상태가 다름`); break; }
+    }
+    if (phones.host.phase !== 'over') { bad++; fail(`같이 치기 ${g}판이 끝나지 않음`); continue; }
+    // 앱을 껐다 켠 폰: 처음 상태 + 기록으로 다시 만들면 같은 판
+    for (const role of ['host', 'guest']) {
+      if (norm(ON.rebuild(init, log, role)) !== norm(phones[role])) { bad++; fail(`같이 치기 ${g}판 ${role} 다시 만들기 결과가 다름`); }
+    }
+    // 정산: 한쪽이 +면 다른 쪽은 - (보너스 점수 포함)
+    const hn = GS.netForPlayer(phones.host.over), gn = GS.netForPlayer(phones.guest.over);
+    if (hn !== -gn) { bad++; fail(`같이 치기 ${g}판 정산이 맞지 않음 (${hn} / ${gn})`); }
+    rounds++;
+  }
+  console.log(`  ${rounds}판 일치 (고/스톱 결정 ${decided}번 포함)`);
+}
+
 console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
 process.exit(failures ? 1 : 0);

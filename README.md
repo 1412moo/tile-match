@@ -8,7 +8,8 @@
 index.html, hub.css, hub.js   게임 선택 메인 화면 (앱을 열면 처음 보이는 화면)
 games/registry.js             게임 목록 (이름·아이콘·경로·준비 여부·저장 키·오프라인 파일)
 games/tile-match/             타일 매치(같은 그림 3개 모으기) - index.html, style.css, levels.js, game.js
-games/gostop/                 고스톱(맞고, 컴퓨터와 1:1) - index.html, style.css, rules.js(규칙·점수·컴퓨터), art.js(패 그림 연결), game.js(화면)
+games/gostop/                 고스톱(맞고, 컴퓨터 또는 각자 폰으로 1:1) - index.html, style.css, rules.js(규칙·점수·컴퓨터), art.js(패 그림 연결), game.js(화면),
+                              online.js(같이 치기: 두 폰 연결·행동 기록 동기화), peerjs.min.js(PeerJS 1.5.5, MIT - peerjs.LICENSE.txt)
 games/gostop/cards/           화투패 SVG 48장 (Wikimedia Commons, CC BY-SA 4.0) + ATTRIBUTION.md(출처·라이선스)
 games/<새 게임>/               앞으로 추가할 게임 (틀린그림찾기, 수박게임은 목록에 '준비중'으로 등록됨)
 sw.js, manifest.webmanifest, icons/   앱 전체 공용 오프라인 캐시 / 홈 화면 설치 (루트에 하나만)

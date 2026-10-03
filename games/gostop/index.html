@@ -11,9 +11,9 @@
   <meta name="apple-mobile-web-app-title" content="엄마 게임천국">
   <title>고스톱</title>
   <link rel="manifest" href="../../manifest.webmanifest">
-  <link rel="icon" href="../../icons/icon-192.png?v=18">
-  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=18">
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="icon" href="../../icons/icon-192.png?v=24">
+  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=24">
+  <link rel="stylesheet" href="style.css?v=24">
 </head>
 <body>
   <div id="app">
@@ -23,9 +23,10 @@
       <div class="home-inner">
         <div class="logo" id="logo"></div>
         <h1>고스톱</h1>
-        <p class="sub">컴퓨터와 둘이 치는 맞고</p>
+        <p class="sub">둘이 치는 맞고 · 컴퓨터 또는 가족과</p>
         <button id="btn-continue" class="btn big">이어하기</button>
         <button id="btn-new" class="btn light">새 판 시작</button>
+        <button id="btn-online" class="btn light">📱 같이 치기 (각자 폰으로)</button>
         <button id="btn-rules" class="btn light">규칙 보기</button>
         <p id="record" class="record"></p>
         <button id="btn-sound-home" class="btn light small">🔊 소리 켜짐</button>
@@ -45,7 +46,7 @@
 
       <div class="side opp" id="opp-side">
         <div class="info">
-          <div class="who">🤖 컴퓨터</div>
+          <div class="who" id="opp-who">🤖 컴퓨터</div>
           <div class="backs" id="opp-hand"></div>
           <div class="badges" id="opp-badges"></div>
           <div class="pts" id="opp-pts">0점</div>
@@ -68,6 +69,7 @@
           <div class="pts" id="my-pts">0점</div>
         </div>
       </div>
+      <div id="net-status" class="hidden"></div>
       <div id="msg"></div>
       <div id="hand"></div>
     </section>
@@ -83,9 +85,11 @@
     </div>
     <div id="toast" class="hidden"></div>
   </div>
-  <script src="rules.js?v=18"></script>
-  <script src="art.js?v=18"></script>
-  <script src="fx.js?v=18"></script>
-  <script src="game.js?v=18"></script>
+  <script src="rules.js?v=24"></script>
+  <script src="art.js?v=24"></script>
+  <script src="fx.js?v=24"></script>
+  <script src="peerjs.min.js?v=24"></script>
+  <script src="online.js?v=24"></script>
+  <script src="game.js?v=24"></script>
 </body>
 </html>

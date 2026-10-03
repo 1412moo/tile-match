@@ -1,11 +1,17 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 18; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 24; // sw.js 의 VERSION 과 같게 유지
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
   const ART = window.GSArt;
+  const NET = window.GSOnline;
+
+  // 같이 치기(각자 폰): net = 연결(GSOnline.Link), onlineMode = 지금 화면의 판이 같이 치는 판인지
+  let net = null, onlineMode = false, waitingRemote = false;
+  const OPP = () => (onlineMode && net ? net.sess.oppName || '상대' : '컴퓨터');
+  const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const $ = sel => document.querySelector(sel);
   const homeEl = $('#home'), gameEl = $('#game'), overlay = $('#overlay');
@@ -27,6 +33,7 @@
 
   // 판이 끝났으면 기록에 한 번만 반영
   function recordResult() {
+    if (onlineMode) return recordOnline();
     if (!S || !S.over || S.over.recorded) return;
     const o = S.over;
     const net = R.netForPlayer(o);
@@ -44,7 +51,24 @@
     o.recorded = true;
   }
 
+  // 같이 치기: 판마다 한 번 전적에 반영 (판은 기록에서 다시 만들어지므로 판 번호로 확인)
+  function recordOnline() {
+    if (!S || !S.over || !net) return;
+    const o = S.over, ss = net.sess;
+    o.net = R.netForPlayer(o);
+    if (ss.recorded === ss.r) return;
+    ss.recorded = ss.r;
+    ss.stats.points += o.net;
+    if (o.draw) ss.stats.draws++; else if (o.winner === 0) ss.stats.wins++; else ss.stats.losses++;
+    if (ss.role === 'host') { // 다음 판 선·배수 (방장 기준 = 이 폰 기준)
+      if (o.draw) { ss.nextMult = Math.min((S.mult || 1) * 2, 16); ss.nextFirst = S.first; }
+      else { ss.nextFirst = o.winner; ss.nextMult = 1; }
+    }
+    net.persist();
+  }
+
   function saveGame() {
+    if (onlineMode) { if (S && S.phase === 'over') recordOnline(); return; } // 같이 치는 판은 행동 기록으로 저장됨
     if (S && S.phase === 'over') recordResult();
     save.current = S && S.phase !== 'over' ? JSON.parse(JSON.stringify(S)) : null;
     persist();
@@ -376,7 +400,11 @@
     $('#opp-pts').textContent = `${R.bestScore(S.captured[1]).total}점`;
     $('#my-pts').textContent = `${R.bestScore(S.captured[0]).total}점`;
     const st = save.stats;
-    $('#my-record').textContent = st.wins + st.losses + st.draws ? recordText() : '첫 판';
+    if (onlineMode && net) {
+      const os = net.sess.stats;
+      $('#my-record').textContent = os.wins + os.losses + os.draws ? recordText('', os) : '첫 판';
+    } else $('#my-record').textContent = st.wins + st.losses + st.draws ? recordText() : '첫 판';
+    $('#opp-who').textContent = onlineMode ? '🙂 ' + OPP() : '🤖 컴퓨터';
     $('#opp-side').classList.toggle('turn', S.turn === 1 && S.phase !== 'over');
     $('#me-side').classList.toggle('turn', S.turn === 0 && S.phase !== 'over');
     const mult = $('#round-mult');
@@ -390,8 +418,8 @@
   }
 
   // 전적: '3승 2패 1무 · +12점' (첫 화면은 '누적' 을 붙임)
-  function recordText(pre) {
-    const st = save.stats;
+  function recordText(pre, stats) {
+    const st = stats || save.stats;
     return `${st.wins}승 ${st.losses}패${st.draws ? ` ${st.draws}무` : ''} · ${pre || ''}${st.points >= 0 ? '+' : ''}${st.points}점`;
   }
 
@@ -435,14 +463,14 @@
 
   const hideFlip = () => $('#flip-show').classList.add('hidden');
 
-  // '컴퓨터 싹쓸이!' → 작은 '컴퓨터' + 큰 '싹쓸이!' (좁은 화면에서도 한 줄에 들어가게)
+  // '컴퓨터 싹쓸이!' → 작은 '컴퓨터' + 큰 '싹쓸이!' (좁은 화면에서도 한 줄에 들어가게. 같이 치기면 상대 이름)
   function whoSplit(el, text) {
-    const m = /^컴퓨터 (.+)$/.exec(text);
-    if (!m) { el.append(text); return; }
+    const name = OPP();
+    if (!text.startsWith(name + ' ')) { el.append(text); return; }
     const w = document.createElement('span');
     w.className = 'who-tag';
-    w.textContent = '컴퓨터';
-    el.append(w, m[1]);
+    w.textContent = name;
+    el.append(w, text.slice(name.length + 1));
   }
 
   async function flash(text, small, ms, kind) {
@@ -546,7 +574,7 @@
     if (!S) return;
     if (S.phase === 'over') { busy = true; render(); showResult(); return; }
     if (S.phase === 'gostop') { handleGoStop(); return; }
-    if (S.turn === 1) { aiTurn(); return; }
+    if (S.turn === 1) { opponentTurn(); return; }
     busy = false;
     setMsg(S.dummies[0] ? '낼 패나 폭탄패를 골라 주세요' : '낼 패를 골라 주세요');
     render();
@@ -688,7 +716,7 @@
       if (S !== game) return undefined;
       sfx.points();
       const oppPi = S.captured[1 - p].some(x => C[x].kind === 'pi') && (R.handsLeft(S, 0) + R.handsLeft(S, 1) > 0);
-      await flash(p === 0 ? '보너스 패!' : '컴퓨터 보너스 패!', (oppPi ? (p === 0 ? '상대 피 1장 · ' : '피 1장 뺏겨요 · ') : '') + '한 장 더 뒤집어요', 650, 'points');
+      await flash(p === 0 ? '보너스 패!' : OPP() + ' 보너스 패!', (oppPi ? (p === 0 ? '상대 피 1장 · ' : '피 1장 뺏겨요 · ') : '') + '한 장 더 뒤집어요', 650, 'points');
       if (S !== game) return undefined;
     }
     if (d === null) return null;
@@ -739,6 +767,7 @@
     const from = p === 0 ? FX.rectOf(handEl(id)) : oppBackRects(1)[0];
     const before = snapshotRects(); // 뺏어 올 피의 원래 자리
     const r = R.play(S, id);
+    if (net && p === 0) net.sendAct({ k: 'bonus', card: id });
     hidden.add(id);
     r.stolen.forEach(x => hidden.add(x));
     if (r.drawn !== null) hidden.add(r.drawn);
@@ -759,22 +788,23 @@
       if (S !== game) return;
     }
     sfx.points();
-    await flash(p === 0 ? '보너스!' : '컴퓨터 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요 · 한 장 더') : '한 장 더', 700, 'points');
+    await flash(p === 0 ? '보너스!' : OPP() + ' 보너스!', r.stolen.length ? (p === 0 ? '상대 피 1장 · 한 장 더' : '피 1장 뺏겼어요 · 한 장 더') : '한 장 더', 700, 'points');
     if (S !== game) return;
     saveGame();
-    if (p === 1) { aiTurn(); return; }
+    if (p === 1) { opponentTurn(); return; }
     busy = false;
     setMsg('한 장 더 내 주세요');
     render();
   }
 
-  async function doPlay(id, opt) {
+  // remoteFc: 같이 치기에서 상대가 고른 '뒤집은 패로 가져올 패'
+  async function doPlay(id, opt, remoteFc) {
     const game = S;
     const p = S.turn;
     const capBefore = S.captured[p].slice(); // 족보 완성 알림용
     if (opt.dummy) {
       R.playDummy(S);
-      setMsg(p === 0 ? '폭탄패: 뒤집기만 해요' : '컴퓨터 폭탄패: 뒤집기만');
+      setMsg(p === 0 ? '폭탄패: 뒤집기만 해요' : OPP() + ' 폭탄패: 뒤집기만');
       render();
     } else {
       // 낼 패들의 출발 위치 (내 손패 / 상대 손패 뒷면)
@@ -789,10 +819,10 @@
         render();
         sfx.rattle();
         await showcase([id, ...S.hands[p].filter(x => same(x, id))],
-          { title: p === 0 ? '흔들기!' : '컴퓨터 흔들기!', sub: '이기면 점수 2배', kind: 'shake', wobble: true, ms: 900 });
+          { title: p === 0 ? '흔들기!' : OPP() + ' 흔들기!', sub: '이기면 점수 2배', kind: 'shake', wobble: true, ms: 900 });
         if (S !== game) return;
       }
-      setMsg(p === 0 ? '' : '컴퓨터가 패를 냈어요');
+      setMsg(p === 0 ? '' : OPP() + ' 패를 냈어요');
       ids.forEach(x => hidden.add(x));
       render();
       await animPlay(p, ids, from, hadMatch);
@@ -800,7 +830,7 @@
       if (res.bomb) { // '타-타-탁' 다음 '쾅!'
         sfx.boom();
         shakeBoard(true);
-        await flash(p === 0 ? '폭탄!' : '컴퓨터 폭탄!', '이기면 점수 2배', 750, 'bomb');
+        await flash(p === 0 ? '폭탄!' : OPP() + ' 폭탄!', '이기면 점수 2배', 750, 'bomb');
         if (S !== game) return;
       }
       await sleep(70);
@@ -814,13 +844,18 @@
       const fo = R.flipOptions(S);
       if (fo) {
         if (p === 0) fc = await pickFloor(fo, '뒤집은 패로 가져올 패를 골라 주세요');
-        else { await sleep(250); fc = R.bestCard(fo); }
+        else { await sleep(250); fc = net ? remoteFc : R.bestCard(fo); }
         if (S !== game) return;
       }
     }
     await sleep(90);
     if (S !== game) return;
 
+    // 같이 치기: 내 차례 한 번(낸 패 + 뒤집은 뒤 고른 패)을 상대 폰에 보냄
+    if (net && p === 0) {
+      net.sendAct({ k: 'turn', card: id, dummy: !!opt.dummy, fc: fc === undefined ? null : fc,
+        opt: { choice: opt.choice === undefined ? null : opt.choice, shake: !!opt.shake, bomb: !!opt.bomb } });
+    }
     // 규칙 적용 → (쪽·뻑·따닥 등 알림) → 먹기 → 피 뺏기
     const before = snapshotRects();
     const res = R.flip(S, fc);
@@ -853,7 +888,7 @@
     for (const y of R.newYaku(capBefore, S.captured[p])) {
       (y.key === 'godori' ? sfx.godori : sfx.yaku)();
       if (y.key !== 'godori' && !y.key.startsWith('gwang')) shakeBoard(false);
-      await showcase(y.ids, { title: (p === 0 ? '' : '컴퓨터 ') + y.name + '!', sub: `+${y.pts}점`, kind: 'yaku', ms: 1200 });
+      await showcase(y.ids, { title: (p === 0 ? '' : OPP() + ' ') + y.name + '!', sub: `+${y.pts}점`, kind: 'yaku', ms: 1200 });
       if (S !== game) return;
     }
   }
@@ -867,7 +902,7 @@
         S.alerted[key] = 1;
         sfx.siren();
         await showcase([...a.have, a.missing], {
-          title: (q === 0 ? '' : '컴퓨터 ') + a.name + ' 비상!',
+          title: (q === 0 ? '' : OPP() + ' ') + a.name + ' 비상!',
           sub: q === 0 ? `이 패만 더 먹으면 +${a.pts}점!` : '이 패를 먼저 가져오세요!',
           kind: 'alert', focus: a.missing, ms: 1300,
         });
@@ -895,14 +930,33 @@
       const last = i === evs.length - 1;
       sfx[sound]();
       if (shake) shakeBoard(shake > 1);
-      await flash((mine ? '' : '컴퓨터 ') + t, [sub, last ? stolenMsg : ''].filter(Boolean).join(' · '), 750, kind);
+      await flash((mine ? '' : OPP() + ' ') + t, [sub, last ? stolenMsg : ''].filter(Boolean).join(' · '), 750, kind);
     }
+  }
+
+  const opponentTurn = () => (net ? remoteTurn() : aiTurn());
+
+  // 같이 치기: 상대 폰에서 올 행동을 기다렸다가 컴퓨터 차례와 같은 연출로 보여 줌
+  async function remoteTurn() {
+    busy = true;
+    const game = S;
+    setMsg(`${OPP()} 차례예요…`);
+    render();
+    waitingRemote = true;
+    const a = await net.next();
+    waitingRemote = false;
+    if (S !== game || !net) return;
+    const hand = S.hands[1];
+    if (a.k === 'bonus' && hand.includes(a.card) && R.isBonus(a.card)) return doBonus(a.card);
+    if (a.k === 'turn' && a.dummy && S.dummies[1]) return doPlay(null, { dummy: true }, a.fc);
+    if (a.k === 'turn' && hand.includes(a.card)) return doPlay(a.card, a.opt || {}, a.fc);
+    rebuildOnline(); // 기록이 어긋남 → 처음 상태부터 다시 계산
   }
 
   async function aiTurn() {
     busy = true;
     const game = S;
-    setMsg('컴퓨터 차례예요…');
+    setMsg(OPP() + ' 차례예요…');
     render();
     await sleep(450);
     if (S !== game) return;
@@ -927,7 +981,7 @@
           emoji: '🎴', title: `${sc}점 났어요!`,
           html: (S.go[0] ? `지금 <b>${S.go[0]}고</b> 중이에요.<br>` : '') +
             `<b>고</b>: 계속해서 점수를 더 내요 (${next}고 → +${next}점${next >= 3 ? ', 점수 ' + 2 ** (next - 2) + '배' : ''}).<br>` +
-            '대신 컴퓨터가 먼저 나면 2배로 잃어요(고박).<br><b>스톱</b>: 여기서 끝내고 점수를 받아요.' +
+            `대신 ${net ? esc(OPP()) + ' 쪽이' : '컴퓨터가'} 먼저 나면 2배로 잃어요(고박).` + '<br><b>스톱</b>: 여기서 끝내고 점수를 받아요.' +
             '<div class="look-row"><button type="button" class="look-btn">👀 판 보기</button></div>',
           row: true,
           buttons: [{ label: `${next}고!`, value: true }, { label: '스톱', cls: 'stop', value: false }],
@@ -938,18 +992,28 @@
         await lookBoard(); // 판을 보다가 '고/스톱 고르기'를 누르면 다시 창
         if (S !== game) return;
       }
+    } else if (net) {
+      setMsg(`${OPP()} 고/스톱 고르는 중…`);
+      waitingRemote = true;
+      const a = await net.next();
+      waitingRemote = false;
+      if (S !== game || !net) return;
+      if (a.k !== 'decide') { rebuildOnline(); return; }
+      go = !!a.go;
     } else {
       await sleep(400);
       go = R.aiGoStop(S);
     }
     if (S !== game) return;
+    if (net && p === 0) net.sendAct({ k: 'decide', go });
+    setMsg('');
     R.decide(S, go);
     if (go) {
       sfx.go();
-      await flash(p === 0 ? `${S.go[0]}고!` : `컴퓨터 ${S.go[1]}고!`, p === 0 ? '계속합니다' : '조심하세요!', 850, 'go');
+      await flash(p === 0 ? `${S.go[0]}고!` : `${OPP()} ${S.go[1]}고!`, p === 0 ? '계속합니다' : '조심하세요!', 850, 'go');
     } else {
       sfx.stop();
-      await flash(p === 0 ? '스톱!' : '컴퓨터 스톱!', '', 850, 'stop');
+      await flash(p === 0 ? '스톱!' : OPP() + ' 스톱!', '', 850, 'stop');
     }
     saveGame();
     if (S === game) proceed();
@@ -973,7 +1037,7 @@
     const o = S.over;
     const bp = o.bonusPts || [0, 0];
     const bonusRows = (bp[0] ? `<tr class="sub"><td>내 보너스(첫뻑 등)</td><td>+${bp[0]}점</td></tr>` : '') +
-      (bp[1] ? `<tr class="sub"><td>컴퓨터 보너스(첫뻑 등)</td><td>-${bp[1]}점</td></tr>` : '');
+      (bp[1] ? `<tr class="sub"><td>${esc(OPP())} 보너스(첫뻑 등)</td><td>-${bp[1]}점</td></tr>` : '');
     const netRow = bonusRows ? `<tr class="total"><td>정산</td><td>${o.net >= 0 ? '+' : ''}${o.net}점</td></tr>` : '';
     let emoji, title, html;
     if (o.draw) {
@@ -987,6 +1051,17 @@
       html = '<table>' + o.lines.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') +
         `<tr class="total"><td>${win ? '딴 점수' : '잃은 점수'}</td><td>${o.points}점</td></tr>` + bonusRows + netRow + '</table>';
       (win ? sfx.win : sfx.lose)();
+    }
+    if (onlineMode && net) {
+      if (net.sess.myReady) { waitNextRound(); return; }
+      showModal({
+        emoji, title, html,
+        buttons: [
+          { label: '한 판 더', onClick: onlineAgain },
+          { label: '그만하기', cls: 'light', onClick: confirmEndOnline },
+        ],
+      });
+      return;
     }
     showModal({
       emoji, title, html,
@@ -1024,7 +1099,7 @@
       box.appendChild(n);
     }
     showModal({
-      title: `${p === 0 ? '내가' : '컴퓨터가'} 먹은 패 (${s.total}점)`, node: box,
+      title: `${p === 0 ? '내가' : net ? OPP() + ' 쪽이' : '컴퓨터가'} 먹은 패 (${s.total}점)`, node: box,
       buttons: [{ label: '닫기', cls: 'light', onClick: () => { } }],
     });
   }
@@ -1077,15 +1152,33 @@
     $('#btn-new').className = save.current ? 'btn light' : 'btn big'; // 하던 판이 없으면 '새 판 시작'이 주 버튼
     const st = save.stats, games = st.wins + st.losses + st.draws;
     $('#record').textContent = games ? recordText('누적 ') : '';
+    $('#btn-online').textContent = NET.Link.load() ? '📱 같이 치던 판 이어서' : '📱 같이 치기 (각자 폰으로)';
     updateSoundButtons();
   }
 
   let skipPop = false;
+  // 판 화면 정리 (규칙 상태 S 는 그대로)
+  function clearBoard() {
+    if (pickResolve) endPick(null);
+    busy = false;
+    waitingRemote = false;
+    selected = null;
+    hideFlip();
+    FX.clear();
+    hidden.clear();
+    resetView();
+    document.querySelectorAll('.showcase, .float-text, .look-bar').forEach(el => el.remove());
+    $('#event').classList.add('hidden');
+  }
   function leaveGame() {
     if (pickResolve) endPick(null);
     if (S && S.phase !== 'over' && !busy) saveGame();
+    if (net) { net.close(false); net = null; } // 같이 치기는 잠시 나감 (기록은 남아 있어 이어서 가능)
+    onlineMode = false;
+    setNetStatus('online');
     S = null;
     busy = false;
+    waitingRemote = false;
     selected = null;
     hideFlip();
     FX.clear();
@@ -1102,7 +1195,7 @@
 
   window.addEventListener('popstate', () => {
     if (skipPop) { skipPop = false; return; }
-    if (busy && S && S.phase !== 'over') { // 패를 주고받는 중에는 무시
+    if (busy && !waitingRemote && S && S.phase !== 'over') { // 패를 주고받는 중에는 무시
       try { history.pushState({ gs: 1 }, ''); } catch (e) { /* 무시 */ }
       return;
     }
@@ -1112,8 +1205,12 @@
   window.addEventListener('resize', () => { if (S) render(); });
 
   async function startNew() {
-    hideModal();
     S = R.newRound(Math.random, save.nextFirst || 0, save.nextMult || 1);
+    return beginRound();
+  }
+  // S 에 새 판이 들어 있을 때: 패 돌리기 연출부터 첫 차례까지
+  async function beginRound() {
+    hideModal();
     slotOf = {};
     busy = true;
     showScreen(gameEl);
@@ -1128,7 +1225,7 @@
         const w = S.over.winner;
         const m = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].find(mm => S.hands[w].filter(x => C[x].month === mm).length === 4);
         sfx.yaku();
-        await showcase(S.hands[w].filter(x => C[x].month === m), { title: (w === 0 ? '' : '컴퓨터 ') + '총통!', sub: `${m}월 4장`, kind: 'yaku', ms: 1800 });
+        await showcase(S.hands[w].filter(x => C[x].month === m), { title: (w === 0 ? '' : OPP() + ' ') + '총통!', sub: `${m}월 4장`, kind: 'yaku', ms: 1800 });
       }
       if (S === game) proceed();
       return;
@@ -1136,7 +1233,8 @@
     saveGame();
     busy = false;
     if ((S.mult || 1) > 1) toast(`나가리 다음 판! 점수 ×${S.mult}`);
-    else if (S.turn === 1) toast('컴퓨터가 먼저 시작해요 (선)');
+    else if (S.turn === 1) toast(net ? `${OPP()} 먼저 시작해요 (선)` : '컴퓨터가 먼저 시작해요 (선)');
+    else if (net) toast('내가 먼저 시작해요 (선)');
     proceed();
   }
 
@@ -1221,6 +1319,206 @@
     });
   }
 
+  // ---------------- 같이 치기 (각자 폰으로) ----------------
+  // 판 위쪽에 연결 상태 띠 (끊겼을 때만)
+  function setNetStatus(st, text) {
+    const el = $('#net-status');
+    const show = onlineMode && st !== 'online';
+    el.classList.toggle('hidden', !show);
+    if (show) el.textContent = '📶 ' + (text || '연결하는 중…');
+    const ls = document.getElementById('lobby-status');
+    if (ls && text) ls.textContent = text;
+  }
+
+  function linkEvents() {
+    return {
+      status: setNetStatus,
+      names: () => { if (S) render(); },
+      needRound: () => hostNewRound(),
+      round: fresh => { // 상대 폰: 방장이 새 판을 보냄 (fresh 가 아니면 다시 붙으면서 판 전체를 받음)
+        if (!net) return;
+        if (!fresh) { rebuildOnline(); return; }
+        clearBoard();
+        onlineMode = true;
+        S = NET.toLocal(net.sess.init, net.sess.role);
+        net.syncCursor();
+        beginRound();
+      },
+      ready: () => {
+        const ss = net.sess;
+        if (ss.role === 'host' && ss.myReady && onlineMode && S && S.phase === 'over') hostNewRound();
+      },
+      bye: () => {
+        const name = OPP();
+        endOnline(false);
+        showModal({ emoji: '👋', title: `${name} 쪽에서 그만했어요`, html: '같이 치기가 끝났어요.', buttons: [{ label: '확인', onClick: () => { } }] });
+      },
+      fail: msg => {
+        const keep = net && net.sess.joined; // 같이 치던 판이면 기록은 남겨 둠 (나중에 이어서)
+        if (keep) goHome(); else endOnline(false);
+        showModal({ emoji: '😥', title: '연결하지 못했어요', html: esc(msg), buttons: [{ label: '확인', onClick: () => { } }] });
+      },
+      codeChanged: code => { const el = document.getElementById('room-code'); if (el) el.textContent = code; },
+    };
+  }
+
+  function startLink(sess) {
+    if (net) net.close(false);
+    net = new NET.Link(sess, linkEvents());
+    net.persist();
+    net.start();
+  }
+
+  // 방장: 새 판을 섞어서 상대에게 보내고 시작
+  function hostNewRound() {
+    if (!net || net.sess.role !== 'host') return;
+    clearBoard();
+    onlineMode = true;
+    const ss = net.sess;
+    S = R.newRound(Math.random, ss.nextFirst || 0, ss.nextMult || 1);
+    net.startRound(S);
+    beginRound();
+  }
+
+  // 저장된 처음 상태 + 행동 기록으로 지금 판을 다시 만든다 (이어서 하기, 다시 연결, 기록이 어긋났을 때)
+  function rebuildOnline() {
+    if (!net || !net.sess.init) return;
+    clearBoard();
+    onlineMode = true;
+    try {
+      S = NET.rebuild(net.sess.init, net.sess.log, net.sess.role);
+    } catch (e) {
+      console.error(e);
+      toast('판을 다시 맞추지 못했어요');
+      return;
+    }
+    net.syncCursor();
+    slotOf = {};
+    hideModal();
+    showScreen(gameEl);
+    setMsg('');
+    render();
+    proceed();
+  }
+
+  function onlineAgain() {
+    net.setReady();
+    if (net.sess.role === 'host' && net.sess.oppReady) hostNewRound();
+    else waitNextRound();
+  }
+  function waitNextRound() {
+    showModal({
+      emoji: '⏳', title: `${OPP()} 쪽을 기다려요`,
+      html: `${esc(OPP())} 폰에서도 <b>한 판 더</b>를 누르면 시작해요.`,
+      buttons: [{ label: '그만하기', cls: 'light', onClick: confirmEndOnline }],
+    });
+  }
+  const backToBoard = () => { if (S && S.phase === 'over') showResult(); };
+  function confirmEndOnline() {
+    showModal({
+      emoji: '🚪', title: '같이 치기를 그만할까요?', html: `${esc(OPP())} 폰에도 끝났다고 알려 줘요.`, row: true,
+      buttons: [{ label: '그만하기', cls: 'red', onClick: () => endOnline(true) }, { label: '취소', cls: 'light', onClick: backToBoard }],
+    });
+  }
+  function endOnline(bye) {
+    if (net) { net.close(bye); net = null; }
+    NET.Link.clear();
+    goHome();
+  }
+  // 판 화면에서 🏠: 잠깐 나가기(나중에 이어서) / 그만하기
+  function askLeaveOnline() {
+    showModal({
+      emoji: '🏠', title: '같이 치기', html: '잠깐 나가도 나중에 <b>같이 치기</b>를 누르면 이어서 칠 수 있어요.',
+      buttons: [
+        { label: '잠깐 나가기', onClick: goHome },
+        { label: '그만하기 (끝내기)', cls: 'light', onClick: confirmEndOnline },
+        { label: '취소', cls: 'light', onClick: backToBoard },
+      ],
+    });
+  }
+
+  // 첫 화면 '같이 치기'
+  function onlineMenu() {
+    const old = NET.Link.load();
+    if (!old) return askName();
+    showModal({
+      emoji: '📱', title: old.init ? '같이 치던 판이 있어요' : '열어 둔 방이 있어요',
+      html: (old.oppName ? `상대: <b>${esc(old.oppName)}</b><br>` : '') + `방 코드 <b>${esc(old.code)}</b> · 내 이름 <b>${esc(old.myName)}</b>`,
+      buttons: [
+        { label: '이어서 하기', onClick: () => resumeOnline(old) },
+        { label: '끝내고 새로 하기', cls: 'light', onClick: () => { NET.Link.clear(); askName(); } },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
+  }
+  function resumeOnline(sess) {
+    startLink(sess);
+    onlineMode = true;
+    if (sess.init) rebuildOnline();
+    else if (sess.role === 'host') showRoomCode();
+    else showConnecting();
+  }
+
+  function askName() {
+    const names = ['엄마', '형', '동생', '아빠'];
+    showModal({
+      emoji: '🙂', title: '내 이름은?',
+      html: '상대 폰 화면에 보일 이름이에요.' +
+        `<div class="name-chips">${names.map(n => `<button type="button" class="btn light chip" data-n="${n}">${n}</button>`).join('')}</div>` +
+        `<input id="in-name" class="text-in" maxlength="8" placeholder="직접 쓰기" value="${esc(NET.Link.lastName())}">`,
+      buttons: [
+        { label: '다음', onClick: () => chooseRole($('#in-name').value.trim() || '나') },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
+    overlay.querySelectorAll('.chip').forEach(b => { b.onclick = () => { hideModal(); chooseRole(b.dataset.n); }; });
+  }
+  function chooseRole(name) {
+    showModal({
+      emoji: '📱', title: '같이 치기',
+      html: '한 사람은 <b>방 만들기</b>, 다른 사람은 <b>방 코드 넣기</b>를 눌러요.<br>두 폰 모두 인터넷이 연결돼 있어야 해요.',
+      buttons: [
+        { label: '방 만들기', onClick: () => { startLink(NET.Link.create('host', name)); showRoomCode(); } },
+        { label: '방 코드 넣기', onClick: () => joinPrompt(name) },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
+  }
+  function showRoomCode() {
+    showModal({
+      emoji: '🔑', title: '방 코드',
+      html: `<div class="room-code" id="room-code">${esc(net.sess.code)}</div>` +
+        '상대 폰에서 <b>같이 치기 → 방 코드 넣기</b>를 누르고<br>이 숫자를 넣어 주세요.' +
+        '<p class="net-wait" id="lobby-status">상대를 기다리는 중…</p>',
+      buttons: [{ label: '취소', cls: 'light', onClick: () => endOnline(false) }],
+    });
+  }
+  function showConnecting() {
+    showModal({
+      emoji: '📶', title: '연결하는 중…',
+      html: `방 <b>${esc(net.sess.code)}</b>에 들어가는 중이에요.<p class="net-wait" id="lobby-status"></p>`,
+      buttons: [{ label: '취소', cls: 'light', onClick: () => endOnline(false) }],
+    });
+  }
+  function joinPrompt(name) {
+    showModal({
+      emoji: '🔑', title: '방 코드 넣기',
+      html: '방을 만든 폰에 보이는 <b>4자리 숫자</b>를 넣어 주세요.' +
+        '<input id="in-code" class="text-in code" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off">',
+      buttons: [
+        { label: '들어가기', onClick: () => {
+          const code = $('#in-code').value.replace(/\D/g, '');
+          if (code.length !== 4) { toast('4자리 숫자를 넣어 주세요'); joinPrompt(name); return; }
+          startLink(NET.Link.create('guest', name, code));
+          showConnecting();
+        } },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
+    const inp = $('#in-code');
+    setTimeout(() => inp.focus(), 50);
+  }
+
   // ---------------- 이벤트 연결 ----------------
   $('#btn-continue').addEventListener('click', () => { sfx.unlock(); resume(); });
   $('#btn-new').addEventListener('click', () => {
@@ -1232,10 +1530,12 @@
     });
   });
   $('#btn-rules').addEventListener('click', showRules);
+  $('#btn-online').addEventListener('click', () => { sfx.unlock(); onlineMenu(); });
   $('#btn-sound-home').addEventListener('click', toggleSound);
   $('#btn-sound').addEventListener('click', toggleSound);
   $('#btn-home').addEventListener('click', () => {
-    if (busy && S && S.phase !== 'over') return toast('패를 주고받는 중이에요. 잠시만요!');
+    if (busy && !waitingRemote && S && S.phase !== 'over') return toast('패를 주고받는 중이에요. 잠시만요!');
+    if (onlineMode) return askLeaveOnline();
     goHome();
   });
   $('#opp-side').addEventListener('click', () => { if (!pickResolve) showCaptured(1); });
