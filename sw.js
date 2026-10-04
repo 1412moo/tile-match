@@ -2,7 +2,7 @@
 // - 온라인: 항상 서버의 최신 파일을 먼저 사용(최대 3초 대기), 받은 파일은 캐시에 저장
 // - 오프라인/응답 없음: 캐시에 저장된 파일로 바로 실행
 // - 게임 진행 데이터(localStorage)는 여기서 절대 건드리지 않는다. 지우는 것은 예전 버전의 파일 캐시뿐.
-const VERSION = 26; // games/registry.js 의 APP_VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 함께 올린다
+const VERSION = 27; // games/registry.js 의 APP_VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 함께 올린다
 const CACHE = 'tilematch-v' + VERSION; // 이름 앞부분은 예전 캐시 정리를 위해 그대로 유지
 
 // 게임 목록에서 준비된 게임의 파일을 가져와 함께 저장한다

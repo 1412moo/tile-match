@@ -3,7 +3,7 @@
 // 난이도(쉬움·보통·어려움): 단어 수준 + 보기 수 + 철자 조립 도움(첫 글자)/방해(헷갈리는 글자)가 함께 바뀐다.
 (function () {
 'use strict';
-const APP_VERSION = 26; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+const APP_VERSION = 27; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
 const SAVE_KEY = 'english.save.v1';
 const ROUND = 10;       // 한 판 문제 수
 
@@ -62,28 +62,49 @@ function fanfare(perfect){
     }
   }catch(e){}
 }
-// 정답: 짧은 축하 소리 (0.5초 남짓). 세 가지 가락 중 하나를 골라 매번 같지 않게,
-// 콤보가 이어질수록 한 음씩(2반음) 높아져 신나게 (최대 5단계)
+// 맑은 종소리 한 음: 사인파 배음(1·2·3·4배)을 겹치고, 높은 배음일수록 빨리 사라지게 (실로폰·오르골 느낌)
+// 짧은 메아리(딜레이)를 살짝 얹어 소리가 퍼지게 한다
+let bus=null;
+function bellOut(c){
+  if(bus&&bus.context===c)return bus;
+  const dry=c.createGain(),d=c.createDelay(),fb=c.createGain(),lp=c.createBiquadFilter(),wet=c.createGain();
+  dry.connect(c.destination);
+  d.delayTime.value=.12;fb.gain.value=.3;lp.type='lowpass';lp.frequency.value=5000;wet.gain.value=.3;
+  dry.connect(d);d.connect(lp);lp.connect(fb);fb.connect(d);lp.connect(wet);wet.connect(c.destination);
+  return bus=dry;
+}
+function bell(c,f,at,vol,dur){
+  const out=bellOut(c),t=c.currentTime+at;
+  [[1,1],[2,.3],[3,.1],[4.02,.05]].forEach(([r,a],n)=>{
+    const o=c.createOscillator(),g=c.createGain(),len=dur/(1+n*.9);
+    o.type='sine';o.frequency.setValueAtTime(f*r,t);
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(vol*a,t+.004);g.gain.exponentialRampToValueAtTime(.0001,t+len);
+    o.connect(g);g.connect(out);o.start(t);o.stop(t+len+.05);
+  });
+}
+// 정답: 높고 맑은 '띵-딩✨' (0.1초 간격 두세 음). 세 가지 중 하나를 골라 매번 같지 않게,
+// 콤보가 이어질수록 반음씩 높아짐 (최대 4단계 - 너무 날카로워지지 않게)
 const CHEERS=[
-  [[523,0],[659,.07],[784,.14],[1047,.21,.34]],          // 도미솔도~
-  [[784,0],[1047,.08],[988,.16],[1319,.24,.32]],         // 솔도시미~
-  [[659,0],[784,.07],[880,.14],[1175,.21],[1319,.3,.3]]  // 미솔라레미~
+  [[1319,0],[1760,.09]],              // 미-라
+  [[1568,0],[2093,.09]],              // 솔-도
+  [[1175,0],[1568,.08],[2349,.16]]    // 레-솔-레
 ];
 function cheer(step){
   const c=audio();if(!c)return;
   try{
-    const k=Math.pow(2,Math.min(step,5)*2/12);
+    const k=Math.pow(2,Math.min(step,4)/12);
     const notes=CHEERS[Math.random()*CHEERS.length|0];
-    notes.forEach(([f,t,dur])=>{
-      tone(c,f*k,t,dur||.1,'triangle',.2);
-      if(dur)tone(c,f*k*2,t,dur*.8,'sine',.05); // 마지막 음: 반짝
+    notes.forEach(([f,t],n)=>{
+      const last=n===notes.length-1;
+      bell(c,f*k,t,last?.16:.12,last?1.1:.5);
+      if(last)bell(c,f*k*2,t+.05,.03,.4); // 끝에 아주 작게 반짝
     });
   }catch(e){}
 }
-// 오답: 낮게 '뿌웅'
+// 오답: 부드럽고 낮은 '뚜-둥'
 function buzz(){
   const c=audio();if(!c)return;
-  try{tone(c,220,0,.16,'triangle',.16);tone(c,165,.15,.3,'triangle',.16)}catch(e){}
+  try{tone(c,392,0,.18,'sine',.14);tone(c,294,.16,.35,'sine',.14)}catch(e){}
 }
 // 발음: 휴대폰 음성 합성. 없는 기기에서는 발음 기능을 숨김
 const canSpeak='speechSynthesis' in window&&'SpeechSynthesisUtterance' in window;
