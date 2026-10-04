@@ -3,7 +3,7 @@
 // 난이도(쉬움·보통·어려움): 단어 수준 + 보기 수 + 철자 조립 도움(첫 글자)/방해(헷갈리는 글자)가 함께 바뀐다.
 (function () {
 'use strict';
-const APP_VERSION = 25; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+const APP_VERSION = 26; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
 const SAVE_KEY = 'english.save.v1';
 const ROUND = 10;       // 한 판 문제 수
 
@@ -62,14 +62,28 @@ function fanfare(perfect){
     }
   }catch(e){}
 }
-function beep(ok){
+// 정답: 짧은 축하 소리 (0.5초 남짓). 세 가지 가락 중 하나를 골라 매번 같지 않게,
+// 콤보가 이어질수록 한 음씩(2반음) 높아져 신나게 (최대 5단계)
+const CHEERS=[
+  [[523,0],[659,.07],[784,.14],[1047,.21,.34]],          // 도미솔도~
+  [[784,0],[1047,.08],[988,.16],[1319,.24,.32]],         // 솔도시미~
+  [[659,0],[784,.07],[880,.14],[1175,.21],[1319,.3,.3]]  // 미솔라레미~
+];
+function cheer(step){
   const c=audio();if(!c)return;
   try{
-    const o=c.createOscillator(),g=c.createGain(),t=c.currentTime;
-    o.connect(g);g.connect(c.destination);
-    o.frequency.value=ok?660:180;g.gain.value=.08;
-    o.start(t);o.stop(t+(ok?.15:.3));
+    const k=Math.pow(2,Math.min(step,5)*2/12);
+    const notes=CHEERS[Math.random()*CHEERS.length|0];
+    notes.forEach(([f,t,dur])=>{
+      tone(c,f*k,t,dur||.1,'triangle',.2);
+      if(dur)tone(c,f*k*2,t,dur*.8,'sine',.05); // 마지막 음: 반짝
+    });
   }catch(e){}
+}
+// 오답: 낮게 '뿌웅'
+function buzz(){
+  const c=audio();if(!c)return;
+  try{tone(c,220,0,.16,'triangle',.16);tone(c,165,.15,.3,'triangle',.16)}catch(e){}
 }
 // 발음: 휴대폰 음성 합성. 없는 기기에서는 발음 기능을 숨김
 const canSpeak='speechSynthesis' in window&&'SpeechSynthesisUtterance' in window;
@@ -255,19 +269,20 @@ function spell(w,head){
 // 채점: 본 문제는 콤보 점수, 틀리면 복습 목록에 넣고 다음 문제로 (판은 끝나지 않음)
 // 복습 문제는 맞히면 5점 (틀려도 답을 보여 주고 넘어감)
 function judge(ok,w){
-  beep(ok);
   const m=$("msg");
   if(ok){
     if(G.review){G.reviewRight++;G.score+=5}
     else{G.right++;G.combo++;G.score+=10+Math.min(G.combo,5)*2}
+    cheer(G.review?0:G.combo-1);
     m.className="msg ok pop";m.textContent="정답! 🎉 "+w[0]+" = "+w[1];
   }else{
+    buzz();
     G.combo=0;
     if(!G.review)G.wrong.push(G.words[G.i]);
     m.className="msg bad";m.textContent="아쉬워요 😢 정답: "+w[0]+" = "+w[1];
   }
-  speak(w[0]);
   const g=G; // 그만하고 나갔으면 다음 문제로 넘어가지 않음
+  setTimeout(()=>{if(G===g)speak(w[0])},ok?550:450); // 축하 소리가 끝난 뒤 발음
   setTimeout(()=>{if(G!==g)return;G.i++;G.locked=false;next()},ok?1600:2200);
 }
 function finish(){
