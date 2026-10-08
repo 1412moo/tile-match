@@ -1349,5 +1349,161 @@ console.log('[고스톱 손패 안내 / 두 장 폭탄 / 게임머니 / 오늘�
   eq('잔액 뒤집기', ON.swapState(t).money.join(), '200,100');
 }
 
-console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
-process.exit(failures ? 1 : 0);
+console.log('[고스톱 음성대화] 연결 / 재연결 시 통화 하나만 / 마이크·상대 소리 / 자동재생 / 방 나가기');
+(async () => {
+  const VO = require('../games/gostop/voice.js');
+  const eq = (name, got, want) => { if (got !== want) fail(`음성: ${name}: ${got} (기대 ${want})`); };
+  const tick = () => new Promise(r => setImmediate(r));
+  // 가짜 브라우저 부품
+  const track = () => ({ kind: 'audio', enabled: true, stopped: false, stop() { this.stopped = true; } });
+  const stream = () => { const t = track(); return { t, getAudioTracks: () => [t], getTracks: () => [t] }; };
+  function fakeCall(id) {
+    const h = {};
+    const senders = [{ track: { kind: 'audio' }, replaced: null, replaceTrack(t) { this.replaced = t; this.track = t; return Promise.resolve(); } }];
+    const pc = { iceConnectionState: 'new', l: [], addEventListener(e, f) { this.l.push(f); }, getSenders: () => senders,
+      set(st) { this.iceConnectionState = st; this.l.forEach(f => f()); } };
+    return { id, h, pc, peerConnection: pc, senders, closed: false, answered: null,
+      on(e, f) { h[e] = f; }, close() { this.closed = true; }, answer(s) { this.answered = s; }, emit(e, x) { if (h[e]) h[e](x); } };
+  }
+  function env(opt) {
+    opt = opt || {};
+    const timers = [];
+    const audio = { srcObject: null, muted: false, volume: 1, paused: true, plays: 0, removed: false,
+      play() { this.plays++; if (opt.block && this.plays === 1) return Promise.reject(new Error('NotAllowedError')); this.paused = false; return Promise.resolve(); },
+      pause() { this.paused = true; }, remove() { this.removed = true; } };
+    const e = {
+      mics: [], silents: [], audio, timers, closedSilent: 0,
+      media: { getUserMedia: () => { if (opt.deny && !opt.allowLater) return Promise.reject(new Error('NotAllowedError')); const s = stream(); e.mics.push(s); return Promise.resolve(s); } },
+      makeAudio: () => audio,
+      makeSilent: () => { const s = stream(); e.silents.push(s); return s; },
+      closeSilent: () => { e.closedSilent++; },
+      now: () => 0,
+      setTimeout: (f, ms) => { const t = { f, ms, on: true }; timers.push(t); return t; },
+      clearTimeout: t => { if (t) t.on = false; },
+      run(ms) { timers.filter(t => t.on && t.ms === ms).forEach(t => { t.on = false; t.f(); }); },
+    };
+    return e;
+  }
+  function peer() { const p = { calls: [], destroyed: false, call(id, s) { const c = fakeCall(id); c.sent = s; p.calls.push(c); return c; } }; return p; }
+  const make = (role, e, p, sent) => new VO.Voice({ role, peer: () => p, send: m => sent && sent.push(m), onChange: () => { } }, e);
+
+  // 1) 상대(guest): 게임 연결이 열리면 마이크로 전화 1통
+  let e = env(), p = peer(), sent = [];
+  let v = make('guest', e, p, sent);
+  await v.start();
+  eq('마이크 권한 요청 1번', e.mics.length, 1);
+  await v.linked('host-id');
+  eq('전화 1통', p.calls.length, 1);
+  eq('마이크 소리로 전화', p.calls[0].sent, e.mics[0]);
+  eq('연결 중', v.state, 'connecting');
+  p.calls[0].pc.set('connected');
+  eq('연결됨', v.state, 'on');
+  p.calls[0].emit('stream', stream());
+  eq('상대 소리 재생', e.audio.plays, 1);
+  if (!sent.some(m => m.t === 'voice' && m.mic === true)) fail('음성: 마이크 켜짐을 상대에게 알리지 않음');
+  // 2) 게임 연결이 끊겼다 다시 붙음 → 예전 통화 닫고 새로 1통 (중복 없음)
+  v.unlinked();
+  await v.linked('host-id');
+  await v.linked('host-id');
+  eq('다시 연결 후 전화 수', p.calls.length, 3);
+  eq('예전 통화 닫힘', p.calls[0].closed && p.calls[1].closed, true);
+  eq('열린 통화는 하나', p.calls.filter(c => !c.closed).length, 1);
+  eq('마이크는 다시 묻지 않음', e.mics.length, 1);
+  // 3) 통화가 끊기면(ICE failed) 상대 쪽은 3초 뒤 다시 건다
+  p.calls[2].pc.set('failed');
+  eq('끊김 표시', v.state, 'lost');
+  eq('끊긴 통화 닫힘', p.calls[2].closed, true);
+  e.run(VO.RETRY_MS);
+  eq('다시 걸기', p.calls.length, 4);
+  // 4) 마이크 끄기/켜기 = 보내는 소리 track.enabled
+  await v.setMic(false);
+  eq('마이크 끔', e.mics[0].t.enabled, false);
+  eq('마이크 끔 상태', v.micOn, false);
+  if (sent[sent.length - 1].mic !== false) fail('음성: 마이크 끔을 알리지 않음');
+  await v.setMic(true);
+  eq('마이크 켬', e.mics[0].t.enabled, true);
+  // 5) 상대 소리 끄기 / 크기
+  v.setSpeaker(false);
+  eq('상대 소리 음소거', e.audio.muted, true);
+  v.setVolume(0.3);
+  eq('상대 소리 크기', e.audio.volume, 0.3);
+  v.setSpeaker(true);
+  eq('상대 소리 다시 켬', e.audio.muted, false);
+  v.remote({ mic: false });
+  eq('상대 마이크 상태', v.oppMic, false);
+  // 6) 방 나가기 → 통화 닫고 마이크 멈춤, 그 뒤로는 전화를 걸지 않음
+  const last = p.calls[3];
+  v.stop();
+  eq('나가면 통화 닫힘', last.closed, true);
+  eq('나가면 마이크 멈춤', e.mics[0].t.stopped, true);
+  eq('나가면 소리 요소 정리', e.audio.removed && e.audio.srcObject === null, true);
+  eq('나가면 꺼짐', v.state, 'off');
+  await v.linked('host-id');
+  e.run(VO.RETRY_MS);
+  eq('나간 뒤 전화 없음', p.calls.length, 4);
+
+  // 7) 방장: 받기만, 새 전화가 오면 예전 통화 닫기
+  e = env(); p = peer();
+  v = make('host', e, p, []);
+  await v.start();
+  await v.linked('guest-id');
+  eq('방장은 걸지 않음', p.calls.length, 0);
+  const c1 = fakeCall('g'), c2 = fakeCall('g');
+  await v.incoming(c1);
+  eq('방장 마이크로 받음', c1.answered, e.mics[0]);
+  await v.incoming(c2);
+  eq('새 전화 오면 예전 통화 닫힘', c1.closed, true);
+  eq('새 통화 받음', c2.answered, e.mics[0]);
+  c1.emit('stream', stream());
+  eq('닫힌 통화 소리는 무시', e.audio.plays, 0);
+  c2.pc.set('connected');
+  eq('방장 연결됨', v.state, 'on');
+  v.stop();
+  eq('방장 나가면 통화 닫힘', c2.closed, true);
+  const c3 = fakeCall('g');
+  await v.incoming(c3);
+  eq('나간 뒤 온 전화는 바로 닫음', c3.closed, true);
+
+  // 8) 마이크 거부 → 무음 소리로 통화(상대 소리는 들림), 나중에 허용하면 보내는 소리만 바꿔 끼움
+  const opt = { deny: true };
+  e = env(opt); p = peer();
+  v = make('guest', e, p, []);
+  await v.start();
+  eq('거부 표시', v.micDenied, true);
+  eq('무음 소리 준비', e.silents.length, 1);
+  await v.linked('host-id');
+  eq('무음 소리로 전화', p.calls[0].sent, e.silents[0]);
+  eq('거부면 마이크 꺼짐', v.micOn, false);
+  eq('거부된 채로 켜기', await v.setMic(true), 'denied');
+  opt.allowLater = true;
+  eq('나중에 허용', await v.setMic(true), 'ok');
+  eq('보내는 소리를 마이크로 교체', p.calls[0].senders[0].replaced, e.mics[0].t);
+  eq('전화를 다시 걸지 않음', p.calls.length, 1);
+  v.stop();
+  eq('무음 소리 멈춤', e.silents[0].t.stopped, true);
+  eq('무음 AudioContext 닫음', e.closedSilent, 1);
+
+  // 9) 자동재생이 막힘 → needTap, 누르면 재생
+  e = env({ block: true }); p = peer();
+  v = make('guest', e, p, []);
+  await v.linked('host-id');
+  p.calls[0].emit('stream', stream());
+  await tick();
+  eq('자동재생 막힘 → 소리 켜기 필요', v.needTap, true);
+  await v.tap();
+  eq('소리 켜기 후 재생', e.audio.paused === false && v.needTap === false, true);
+  // 10) 화면 복귀: 멈춘 소리 다시 재생, 끊긴 통화 다시 걸기
+  e.audio.paused = true;
+  p.calls[0].pc.set('failed');
+  const before = p.calls.length;
+  v.wake();
+  eq('화면 복귀 시 다시 걸기', p.calls.length, before + 1);
+  // 연결이 오래 안 되면 '실패' 표시 + 상대 쪽은 다시 걸기
+  e.run(VO.CONNECT_LIMIT);
+  eq('오래 안 붙으면 실패 표시', v.state, 'failed');
+  v.stop();
+  console.log('  음성 테스트 끝');
+})().catch(err => fail('음성 테스트 오류: ' + (err && err.stack || err))).then(() => {
+  console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');
+  process.exit(failures ? 1 : 0);
+});

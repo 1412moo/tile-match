@@ -13,7 +13,9 @@
 //   점당은 방장이 방을 만들 때만 정하고, 판마다 처음 상태(init.stake)에 넣어 보낸다.
 //   두 폰은 init 의 stake·판 시작 잔액(init.money)으로 정산하므로 한쪽에서 값을 바꿔도 이미 시작한 판에는 영향이 없다.
 // 메시지(t): hello 인사(이름·기록 길이·잔액·점당) / round 새 판 / act 행동 / ready 한 판 더 / bye 그만하기
-//   deny 방장이 참가를 거절(게임머니 부족) / chat 채팅 / ping 연결 확인
+//   deny 방장이 참가를 거절(게임머니 부족) / chat 채팅 / voice 내 마이크 켜짐 여부 / ping 연결 확인
+// 음성대화(voice.js)는 같은 Peer 의 MediaConnection 으로 따로 연다. 여기서는 이벤트만 넘겨 준다
+//   (ev.linked 게임 연결 열림 / ev.unlinked 끊김 / ev.call 전화 옴 / ev.voice 상대 마이크 상태 / ev.closed 방 나감)
 (function (root) {
   'use strict';
   const R = root.GS || (typeof require !== 'undefined' ? require('./rules.js') : null);
@@ -157,6 +159,10 @@
         else this.connect();
       });
       peer.on('connection', c => { if (peer === this.peer && host) this.adopt(c); });
+      peer.on('call', call => { // 음성 전화 (게임 연결과 별개 - 못 받으면 닫기만)
+        if (peer === this.peer && !this.closed && this.ev.call) this.ev.call(call);
+        else try { call.close(); } catch (e) { /* 무시 */ }
+      });
       peer.on('disconnected', () => { // 찾기 서버와만 끊김 (이미 연결된 상대와는 계속 통함)
         if (peer !== this.peer || this.closed || peer.destroyed) return;
         setTimeout(() => { if (peer === this.peer && !peer.destroyed && peer.disconnected) try { peer.reconnect(); } catch (e) { /* 무시 */ } }, 1500);
@@ -209,6 +215,7 @@
         this.lastRecv = Date.now();
         this.setState('online', '');
         this.hello();
+        if (this.ev.linked) this.ev.linked(c.peer);
       });
       c.on('data', d => { if (c === this.conn) this.recv(d); });
       const lost = () => {
@@ -216,6 +223,7 @@
         this.conn = null;
         this.connecting = false;
         if (this.closed) return;
+        if (this.ev.unlinked) this.ev.unlinked();
         if (this.sess.role === 'host' && !this.sess.joined) this.setState('waiting', '상대를 기다리는 중…');
         else this.setState('lost', '연결이 끊겼어요. 다시 연결하는 중…');
       };
@@ -240,6 +248,7 @@
         const c = this.conn;
         this.conn = null;
         try { c.close(); } catch (e) { /* 무시 */ }
+        if (this.ev.unlinked) this.ev.unlinked();
         this.setState('lost', '연결이 끊겼어요. 다시 연결하는 중…');
       }
       if (woke && this.peer && (this.peer.destroyed || this.peer.disconnected)) this.retry(100);
@@ -313,6 +322,9 @@
           return;
         case 'bye':
           this.ev.bye();
+          return;
+        case 'voice':
+          if (this.ev.voice) this.ev.voice(m);
           return;
         case 'deny': // 방장이 거절: 게임머니 부족
           if (host) return;
@@ -408,6 +420,7 @@
       this.timers.forEach(clearInterval);
       clearTimeout(this.retryTimer);
       document.removeEventListener('visibilitychange', this.onVis);
+      if (this.ev.closed) this.ev.closed(); // 음성대화도 끝냄 (마이크 정리)
       const peer = this.peer, conn = this.conn;
       this.peer = null; this.conn = null;
       // bye 가 실제로 나가도록 조금 뒤에 끊음

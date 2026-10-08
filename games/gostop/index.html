@@ -11,9 +11,9 @@
   <meta name="apple-mobile-web-app-title" content="엄마 게임천국">
   <title>고스톱</title>
   <link rel="manifest" href="../../manifest.webmanifest">
-  <link rel="icon" href="../../icons/icon-192.png?v=30">
-  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=30">
-  <link rel="stylesheet" href="style.css?v=30">
+  <link rel="icon" href="../../icons/icon-192.png?v=31">
+  <link rel="apple-touch-icon" href="../../icons/icon-192.png?v=31">
+  <link rel="stylesheet" href="style.css?v=31">
 </head>
 <body>
   <div id="app">
@@ -45,6 +45,14 @@
         <button id="btn-chat" class="icon-btn hidden" aria-label="채팅">💬<span id="chat-dot" class="chat-dot hidden"></span></button>
         <button id="btn-sound" class="icon-btn" aria-label="소리">🔊</button>
       </header>
+      <!-- 같이 치기 음성대화 (voice.js) -->
+      <div id="voice-bar" class="voice-bar hidden">
+        <button id="v-mic" class="v-btn" type="button"></button>
+        <button id="v-spk" class="v-btn" type="button"></button>
+        <input id="v-vol" class="v-vol" type="range" min="0" max="100" value="100" aria-label="상대 소리 크기">
+        <span id="v-state" class="v-state"></span>
+        <button id="v-tap" class="v-btn v-tap hidden" type="button">🔈 소리 켜기</button>
+      </div>
 
       <div class="side opp" id="opp-side">
         <div class="info">
@@ -101,12 +109,13 @@
       </div>
     </div>
   </div>
-  <script src="../../wallet.js?v=30"></script>
-  <script src="rules.js?v=30"></script>
-  <script src="art.js?v=30"></script>
-  <script src="fx.js?v=30"></script>
-  <script src="peerjs.min.js?v=30"></script>
-  <script src="online.js?v=30"></script>
-  <script src="game.js?v=30"></script>
+  <script src="../../wallet.js?v=31"></script>
+  <script src="rules.js?v=31"></script>
+  <script src="art.js?v=31"></script>
+  <script src="fx.js?v=31"></script>
+  <script src="peerjs.min.js?v=31"></script>
+  <script src="online.js?v=31"></script>
+  <script src="voice.js?v=31"></script>
+  <script src="game.js?v=31"></script>
 </body>
 </html>

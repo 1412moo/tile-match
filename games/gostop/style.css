@@ -385,3 +385,19 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
   box-shadow: 0 6px 16px rgba(0, 0, 0, .35); pointer-events: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .stake-line { font-size: 18px; margin: 0 0 10px; color: #555; }
+
+/* ---------- 음성대화 (같이 치기) ---------- */
+.voice-bar { display: flex; align-items: center; gap: 5px; padding: 0 8px 4px; }
+.v-btn {
+  flex: none; min-height: 36px; padding: 0 8px; border-radius: 12px; font-size: 14px; font-weight: 800; white-space: nowrap;
+  color: var(--ink); background: rgba(255, 255, 255, .92); box-shadow: 0 3px 0 rgba(0, 0, 0, .2);
+}
+.v-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(0, 0, 0, .2); }
+.v-btn.off { background: rgba(255, 255, 255, .45); color: #333; }
+.v-tap { background: #ffe24a; animation: pick .8s ease-in-out infinite; }
+.v-vol { flex: 1; min-width: 36px; height: 28px; accent-color: #ffe24a; }
+.v-vol:disabled { opacity: .4; }
+.v-state { flex: none; font-size: 12px; font-weight: 800; white-space: nowrap; opacity: .9; }
+.v-state.s-on { color: #9dff9d; }
+.v-state.s-lost, .v-state.s-failed { color: #ffb0a8; }
+.voice-audio { display: none; }

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 30; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 31; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -10,6 +10,7 @@
 
   // 같이 치기(각자 폰): net = 연결(GSOnline.Link), onlineMode = 지금 화면의 판이 같이 치는 판인지
   let net = null, onlineMode = false, waitingRemote = false;
+  let voice = null; // 같이 치기 음성대화 (voice.js) - 연결(net)과 함께 만들고 함께 끝냄
   const OPP = () => (onlineMode && net ? net.sess.oppName || '상대' : '컴퓨터');
   const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -419,7 +420,8 @@
       const os = net.sess.stats;
       $('#my-record').textContent = os.wins + os.losses + os.draws ? recordText(os) : '첫 판';
     } else $('#my-record').textContent = st.wins + st.losses + st.draws ? recordText() : '첫 판';
-    $('#opp-who').textContent = onlineMode ? '🙂 ' + OPP() : '🤖 컴퓨터';
+    $('#opp-who').textContent = onlineMode ? '🙂 ' + OPP() + voiceTag() : '🤖 컴퓨터';
+    renderVoice();
     $('#opp-side').classList.toggle('turn', S.turn === 1 && S.phase !== 'over');
     $('#me-side').classList.toggle('turn', S.turn === 0 && S.phase !== 'over');
     const mult = $('#round-mult');
@@ -1491,16 +1493,76 @@
       },
       codeChanged: code => { const el = document.getElementById('room-code'); if (el) el.textContent = code; },
       money: () => W.money(),
+      // 음성대화: 실패해도 게임에는 영향 없음
+      linked: id => { if (voice) voice.linked(id); },
+      unlinked: () => { if (voice) voice.unlinked(); },
+      call: c => { if (voice) voice.incoming(c); else try { c.close(); } catch (e) { /* 무시 */ } },
+      voice: m => { if (voice) voice.remote(m); },
+      closed: stopVoice,
       chat: onChatMsg,
     };
   }
 
   function startLink(sess) {
     if (net) net.close(false);
+    stopVoice();
     net = new NET.Link(sess, linkEvents());
     net.persist();
+    startVoice(net);
     net.start();
   }
+
+  // ---------------- 음성대화 (같이 치기) ----------------
+  // 방에 들어가면 마이크 권한을 묻고, 게임 연결이 열리면 통화가 이어진다. 방을 나가면(net.close) 함께 끝남
+  function startVoice(link) {
+    if (!window.GSVoice) return;
+    try {
+      voice = new window.GSVoice.Voice({
+        role: link.sess.role,
+        peer: () => link.peer,
+        send: m => link.send(m),
+        onChange: () => { if (S && onlineMode) $('#opp-who').textContent = '🙂 ' + OPP() + voiceTag(); renderVoice(); },
+      }, window.GSVoice.browserEnv());
+      voice.start();
+    } catch (e) { voice = null; } // 음성이 안 돼도 게임은 그대로
+  }
+  function stopVoice() {
+    if (voice) { voice.stop(); voice = null; }
+    renderVoice();
+  }
+  // 상대 이름 옆: 통화 중이면 마이크 켜짐 🎙️ / 꺼짐 🔇
+  function voiceTag() {
+    if (!voice || voice.state !== 'on' || voice.oppMic === null) return '';
+    return voice.oppMic ? ' 🎙️' : ' 🔇';
+  }
+  const VOICE_STATE = { off: '', connecting: '📞 연결 중…', on: '📞 연결됨', lost: '📞 끊김', failed: '📞 실패' };
+  function renderVoice() {
+    const bar = $('#voice-bar');
+    const show = !!(voice && onlineMode && S);
+    bar.classList.toggle('hidden', !show);
+    if (!show) return;
+    $('#v-mic').textContent = voice.micOn ? '🎙️ 내 마이크' : '🔇 내 마이크';
+    $('#v-mic').classList.toggle('off', !voice.micOn);
+    $('#v-spk').textContent = voice.spkOn ? '🔊 상대 소리' : '🔈 상대 소리';
+    $('#v-spk').classList.toggle('off', !voice.spkOn);
+    $('#v-vol').value = Math.round(voice.volume * 100);
+    $('#v-vol').disabled = !voice.spkOn;
+    const st = $('#v-state');
+    st.textContent = VOICE_STATE[voice.state] || '';
+    st.className = 'v-state s-' + voice.state;
+    // 자동재생이 막혔으면 '소리 켜기'만 크게 (좁은 화면이라 소리 크기·상태 자리에)
+    $('#v-tap').classList.toggle('hidden', !voice.needTap);
+    $('#v-vol').classList.toggle('hidden', voice.needTap);
+    st.classList.toggle('hidden', voice.needTap);
+  }
+  $('#v-mic').addEventListener('click', async () => {
+    if (!voice) return;
+    const r = await voice.setMic(!voice.micOn);
+    if (r === 'denied') toast('마이크를 쓸 수 없어요. 브라우저 설정에서 마이크를 허용해 주세요');
+  });
+  $('#v-spk').addEventListener('click', () => { if (voice) voice.setSpeaker(!voice.spkOn); });
+  $('#v-vol').addEventListener('input', e => { if (voice) voice.setVolume(e.target.value / 100); });
+  $('#v-tap').addEventListener('click', () => { if (voice) voice.tap(); });
 
   // 방장: 새 판을 섞어서 상대에게 보내고 시작
   function hostNewRound() {
@@ -1779,6 +1841,7 @@
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden' && S && !busy && S.phase === 'play') saveGame();
+    if (document.visibilityState === 'visible' && voice) voice.wake(); // 화면 꺼짐·앱 전환 뒤 음성 다시 잇기
   });
 
   $('#deck .hw').style.backgroundImage = ART.back(); // 가운데 더미는 뒷면
