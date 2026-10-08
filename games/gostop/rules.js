@@ -11,7 +11,9 @@
 //  - 첫뻑 +7, 연뻑(두 번 연속) +14, 첫따닥 +7 (상대에게서 바로 받음), 삼연뻑 21점으로 끝
 //  - 나가리: 다음 판 점수 2배 (누적), 선 유지
 //  - 9월 국진: 열끗/쌍피 중 점수가 높은 쪽으로 자동 계산
-//  - 2장 폭탄(피망 뉴맞고 변형)과 쇼당(3인 고스톱 규칙)은 표준 맞고에 없어 넣지 않음
+//  - 두 장 폭탄(인터넷 맞고 규칙, 콩알탄): 손에 같은 달 2장 + 바닥에 2장 → 한꺼번에 내서 4장 먹기.
+//    상대 피 1장, 폭탄패(뒤집기만) 1장. 흔들기·폭탄 배수(×2)에는 들어가지 않음
+//  - 쇼당(3인 고스톱 규칙)은 맞고에 없어 넣지 않음
 (function (root) {
   'use strict';
 
@@ -207,6 +209,22 @@
     const m = month(cardId);
     return !!m && countMonth(s.hands[s.turn], m) === 3 && floorMatches(s, m).length === 1;
   }
+  // 두 장 폭탄: 같은 달 2장을 들고 있고 바닥에 나머지 2장
+  function canBomb2(s, cardId) {
+    const m = month(cardId);
+    return !!m && countMonth(s.hands[s.turn], m) === 2 && floorMatches(s, m).length === 2;
+  }
+  // 손패 안내 (차례인 사람 기준): 'first' 먼저 내야 할 패(노란 테두리) / 'later' 나중에 내도 되는 패(회색) / null 바닥에 짝 없음
+  //   그 달 4장이 바닥·내 손·양쪽 먹은 패에 모두 보이면 아무도 먼저 가져갈 수 없으니 'later'.
+  //   보너스패와 폭탄(3장·2장)이 되는 패는 늘 'first'.
+  function playHint(s, cardId) {
+    if (isBonus(cardId)) return 'first';
+    const m = month(cardId), F = floorMatches(s, m);
+    if (!F.length) return null;
+    if (canBomb(s, cardId) || canBomb2(s, cardId)) return 'first';
+    const seen = F.length + countMonth(s.hands[s.turn], m) + countMonth(s.captured[0], m) + countMonth(s.captured[1], m);
+    return seen >= 4 ? 'later' : 'first';
+  }
   // 흔들기: 같은 달 3장을 들고 있을 때 (그 달에 대해 한 번만 물어봄, 폭탄이 되는 경우는 폭탄으로)
   function canShake(s, cardId) {
     const m = month(cardId), p = s.turn;
@@ -243,6 +261,14 @@
       s.dummies[p] += 2; // 폭탄 후 뒤집기만 하는 차례 2번
       s.pending = { card: cardId, cards: three, m, F, pair: null, took: F.slice(), bomb: true };
       return { bomb: true };
+    }
+    if (opt.bomb && canBomb2(s, cardId)) { // 두 장 폭탄: 배수(s.bomb)에는 넣지 않음
+      const two = hand.filter(id => month(id) === m);
+      two.forEach(rm);
+      s.floor.push(...two);
+      s.dummies[p] += 1; // 뒤집기만 하는 차례 1번
+      s.pending = { card: cardId, cards: two, m, F, pair: null, took: F.slice(), bomb: true, bomb2: true };
+      return { bomb: true, bomb2: true };
     }
     if (canShake(s, cardId)) {
       s.shook[p].push(m);          // 물어본 달은 다시 묻지 않음
@@ -325,7 +351,7 @@
     } else {
       if (pd.took) {
         take.push(...pd.cards, ...pd.took);
-        if (pd.bomb) { ev.push('bomb'); steal++; }
+        if (pd.bomb) { ev.push(pd.bomb2 ? 'bomb2' : 'bomb'); steal++; }
         steal += ppeokBonus(s, p, pd.m, ev);
       } else if (pd.pair !== null) take.push(pd.card, pd.pair);
       if (d !== null) {
@@ -457,6 +483,18 @@
     return (over.winner === 0 ? over.points : -over.points) + bonus;
   }
 
+  // ---------------- 게임머니 정산 ----------------
+  // 판이 끝났을 때 나(0)의 게임머니 증감 = 정산 점수(netForPlayer) × 점당.
+  //   money = [나, 상대] 판 시작 때 잔액. 진 쪽 잔액보다 많이 잃지 않게 잘라서 0 아래로 내려가지 않고,
+  //   딴 쪽은 진 쪽이 실제로 낸 만큼만 받으므로 두 사람 합계가 그대로 유지된다.
+  function moneyDelta(over, stake, money) {
+    const amount = netForPlayer(over) * (stake || 0);
+    const m = money || [Infinity, Infinity];
+    if (amount > 0) return Math.min(amount, Math.max(0, m[1]));
+    if (amount < 0) return -Math.min(-amount, Math.max(0, m[0]));
+    return 0;
+  }
+
   // ---------------- 컴퓨터 ----------------
   function cardValue(id) {
     const c = CARDS[id];
@@ -479,6 +517,7 @@
       const F = floorMatches(s, month(id));
       let v;
       if (canBomb(s, id)) v = 20;
+      else if (canBomb2(s, id)) v = 15;
       else if (F.length === 0) v = -cardValue(id) * 0.6;
       else if (F.length === 3) v = cardValue(id) + F.reduce((a, f) => a + cardValue(f), 0) + 2;
       else v = cardValue(id) + Math.max(...F.map(cardValue));
@@ -487,7 +526,7 @@
     }
     if (bestV < 0 && s.dummies[p] > 0) return { dummy: true };
     const opts = handOptions(s, best);
-    return { card: best, choice: opts ? bestCard(opts) : null, shake: true, bomb: canBomb(s, best) };
+    return { card: best, choice: opts ? bestCard(opts) : null, shake: true, bomb: canBomb(s, best) || canBomb2(s, best) };
   }
 
   // 고/스톱: 지금 스톱하면 받을 점수와, 고를 했을 때의 기대 점수를 비교한다 (난수 없이 판 상황만으로 판단)
@@ -565,7 +604,7 @@
 
   const api = {
     CARDS, N_CARDS, GUKJIN, MONTH_NAME, WIN_SCORE, PTS,
-    newRound, upgradeState, score, bestScore, handOptions, canBomb, canShake, play, playDummy,
+    newRound, upgradeState, score, bestScore, handOptions, canBomb, canBomb2, playHint, moneyDelta, canShake, play, playDummy,
     peek, peekBonus, flipOptions, flip, endTurn, decide, netForPlayer, handsLeft,
     aiPick, aiGoStop, bestCard, cardValue, month, isBonus, YAKU, yakuAlerts, newYaku,
   };

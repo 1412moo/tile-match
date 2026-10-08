@@ -3,7 +3,7 @@
 
   const { EMOJIS, generateLevel, levelParams, overlaps, solvableShuffle } = window.TM_Levels;
 
-  const APP_VERSION = 9; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 29; // sw.js 의 VERSION 과 같게 유지
   const SLOT_SIZE = 7;
   const BOOSTER_START = { undo: 3, shuffle: 2, hint: 3 }; // 레벨마다 다시 채워짐
   const SAVE_KEY = 'tilematch.save.v1';
@@ -369,6 +369,7 @@
     const lv = G.level;
     G.busy = true; // 결과 창이 뜰 때까지 다른 조작 막기
     save.level = Math.max(save.level, lv + 1);
+    if (window.Wallet) window.Wallet.recordPlay('tile-match'); // 오늘의 미션 (한 판 마침)
     save.current = null;
     persist();
     sfx.win();
@@ -383,6 +384,7 @@
 
   function onLose() {
     const lv = G.level;
+    if (window.Wallet) window.Wallet.recordPlay('tile-match'); // 오늘의 미션 (한 판 마침)
     sfx.lose();
     showModal({
       emoji: '😢', title: '칸이 가득 찼어요', text: '다시 도전해 보세요!',

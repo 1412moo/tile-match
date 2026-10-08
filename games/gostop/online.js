@@ -8,12 +8,18 @@
 //   각 폰은 자기가 '나(0)'가 되도록 상태를 뒤집어서 본다 (방장: 그대로, 상대: swapState).
 //   연결이 끊겼다 다시 붙으면 서로 가진 기록 길이를 알려 주고 모자란 뒤쪽만 다시 보낸다.
 //   폰에서 앱이 꺼져도 기록이 localStorage 에 있어서 다시 열면 그대로 이어진다.
+//
+// 방 정보: 방 ID(code) · 방장(hostName) · 플레이어 · 점당 게임머니(stake) · 상태 - room() 참고
+//   점당은 방장이 방을 만들 때만 정하고, 판마다 처음 상태(init.stake)에 넣어 보낸다.
+//   두 폰은 init 의 stake·판 시작 잔액(init.money)으로 정산하므로 한쪽에서 값을 바꿔도 이미 시작한 판에는 영향이 없다.
+// 메시지(t): hello 인사(이름·기록 길이·잔액·점당) / round 새 판 / act 행동 / ready 한 판 더 / bye 그만하기
+//   deny 방장이 참가를 거절(게임머니 부족) / chat 채팅 / ping 연결 확인
 (function (root) {
   'use strict';
   const R = root.GS || (typeof require !== 'undefined' ? require('./rules.js') : null);
 
   // ---------------- 규칙 쪽 (화면·네트워크와 무관 - Node 테스트 가능) ----------------
-  const PER_PLAYER = ['hands', 'captured', 'go', 'goScore', 'shake', 'bomb', 'dummies', 'shook', 'turnNo', 'ppeokRun', 'bonusPts'];
+  const PER_PLAYER = ['hands', 'captured', 'go', 'goScore', 'shake', 'bomb', 'dummies', 'shook', 'turnNo', 'ppeokRun', 'bonusPts', 'money'];
   const clone = o => JSON.parse(JSON.stringify(o));
 
   // 플레이어 0 ↔ 1 을 바꾼 상태 (새 객체)
@@ -55,13 +61,18 @@
   const PREFIX = 'mom-gamechunguk-gostop-'; // 다른 PeerJS 사용자와 겹치지 않게 붙이는 앞글자
   const KEY = 'gostop.online.v1';
   const PING_MS = 4000, DEAD_MS = 13000, RETRY_MS = 3000, CONNECT_TIMEOUT = 9000;
+  const PROTO = 2; // 주고받는 형식 버전 (2: 게임머니·두 장 폭탄·채팅). 다르면 같이 칠 수 없음
+  // 채팅: 한 줄 최대 글자 / 도배 막기 (1초에 1개, 10초에 5개) / 기억할 줄 수
+  const CHAT_MAX = 60, CHAT_GAP_MS = 1000, CHAT_BURST = 5, CHAT_WINDOW_MS = 10000, CHAT_KEEP = 50;
+  // 받은 글: 문자열로 바꾸고 줄바꿈 외 제어 문자를 지우고 길이를 자른다 (화면에는 textContent 로만 넣음)
+  const cleanText = t => String(t == null ? '' : t).replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '').replace(/\n{2,}/g, '\n').trim().slice(0, CHAT_MAX);
 
   function loadSession() {
     try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
   }
   const newCode = () => String(1000 + Math.floor(Math.random() * 9000));
 
-  // ev: { status(state, text), round(fresh), act(), ready(), bye(), fail(msg), needRound() }
+  // ev: { status(state, text), round(fresh), act(), ready(), bye(), fail(msg), needRound(), money() 내 잔액, chat(msg) }
   //   state: 'connecting' | 'waiting'(방장: 상대 기다림) | 'online' | 'lost'
   class Link {
     constructor(sess, ev) {
@@ -83,11 +94,13 @@
       this.timers.push(setInterval(() => this.tick(), 1000));
     }
 
-    static create(role, myName, code) {
+    // stake: 방장이 정한 점당 게임머니 (상대는 0 으로 시작해 방장 인사에서 받음)
+    static create(role, myName, code, stake) {
       const old = loadSession();
       const stats = (old && old.stats) || { wins: 0, losses: 0, draws: 0, points: 0 };
       return { role, code: code || newCode(), myName, oppName: '', r: 0, init: null, log: [],
-        nextFirst: 0, nextMult: 1, myReady: false, oppReady: false, recorded: 0, stats, joined: false };
+        nextFirst: 0, nextMult: 1, myReady: false, oppReady: false, recorded: 0, stats, joined: false,
+        stake: role === 'host' ? stake : 0, oppMoney: null, chat: [] };
     }
     static load() { const s = loadSession(); return s && s.code && s.role ? s : null; }
     static clear() {
@@ -101,6 +114,25 @@
 
     persist() { try { localStorage.setItem(KEY, JSON.stringify(this.sess)); } catch (e) { /* 무시 */ } }
     get connected() { return !!(this.conn && this.conn.open); }
+
+    // 방 정보 (화면 표시·확인용)
+    room() {
+      const s = this.sess, host = s.role === 'host';
+      return {
+        id: s.code,
+        host: host ? s.myName : s.oppName,
+        players: [s.myName, s.oppName].filter(Boolean),
+        stake: s.stake,
+        status: !s.joined ? 'waiting' : s.init ? 'playing' : 'ready',
+      };
+    }
+    myMoney() { return this.ev.money ? this.ev.money() : 0; }
+    hello() {
+      const s = this.sess;
+      const m = { t: 'hello', pv: PROTO, name: s.myName, r: s.r, n: s.log.length, ready: s.myReady, money: this.myMoney() };
+      if (s.role === 'host') m.stake = s.stake;
+      this.send(m);
+    }
 
     setState(st, text) {
       this.state = st;
@@ -176,14 +208,16 @@
         this.everConnected = true;
         this.lastRecv = Date.now();
         this.setState('online', '');
-        this.send({ t: 'hello', name: this.sess.myName, r: this.sess.r, n: this.sess.log.length, ready: this.sess.myReady });
+        this.hello();
       });
       c.on('data', d => { if (c === this.conn) this.recv(d); });
       const lost = () => {
         if (c !== this.conn) return;
         this.conn = null;
         this.connecting = false;
-        if (!this.closed) this.setState('lost', '연결이 끊겼어요. 다시 연결하는 중…');
+        if (this.closed) return;
+        if (this.sess.role === 'host' && !this.sess.joined) this.setState('waiting', '상대를 기다리는 중…');
+        else this.setState('lost', '연결이 끊겼어요. 다시 연결하는 중…');
       };
       c.on('close', lost);
       c.on('error', lost);
@@ -224,7 +258,19 @@
       switch (m.t) {
         case 'ping': return;
         case 'hello': {
-          if (m.name && m.name !== s.oppName) { s.oppName = String(m.name).slice(0, 8); this.ev.names && this.ev.names(); }
+          if (m.pv !== PROTO) { // 한쪽 폰이 예전 버전 (형식이 달라 판이 어긋남)
+            this.send({ t: 'bye' });
+            this.ev.fail('두 폰의 고스톱 버전이 달라요. 두 폰 모두 고스톱을 껐다가 다시 열어 최신 버전으로 맞춰 주세요.');
+            return;
+          }
+          if (m.name && m.name !== s.oppName) { s.oppName = cleanText(m.name).slice(0, 8); this.ev.names && this.ev.names(); }
+          if (typeof m.money === 'number' && isFinite(m.money)) s.oppMoney = Math.max(0, Math.floor(m.money));
+          if (!host && typeof m.stake === 'number' && m.stake > 0) s.stake = Math.floor(m.stake); // 점당은 방장 값만 따름
+          // 처음 들어올 때 게임머니가 점당보다 적으면 참가할 수 없음 (방장·상대 양쪽에서 확인)
+          if (!s.joined && s.stake > 0) {
+            if (host && s.oppMoney !== null && s.oppMoney < s.stake) { this.send({ t: 'deny', why: 'money', stake: s.stake }); return; }
+            if (!host && this.myMoney() < s.stake) { this.ev.fail(moneyMsg(s.stake)); return; }
+          }
           if (!s.joined) { s.joined = true; }
           this.persist();
           if (host) {
@@ -239,18 +285,19 @@
           if (host) return;
           const fresh = m.r !== s.r || !s.init;
           if (!fresh && m.log.length <= s.log.length) return;
-          s.r = m.r; s.init = m.init; s.log = m.log; s.oppName = m.name || s.oppName;
+          s.r = m.r; s.init = m.init; s.log = m.log; s.oppName = m.name ? cleanText(m.name).slice(0, 8) : s.oppName;
+          if (m.init && m.init.stake) s.stake = m.init.stake;
           s.myReady = false; s.oppReady = false; s.joined = true;
           this.persist();
           this.cursor = 0;
           this.ev.round(m.log.length === 0);
-          this.send({ t: 'hello', name: s.myName, r: s.r, n: s.log.length, ready: false });
+          this.hello();
           return;
         }
         case 'act': {
           if (m.r !== s.r) return;
           if (m.i < s.log.length) return; // 이미 받음
-          if (m.i > s.log.length) { this.send({ t: 'hello', name: s.myName, r: s.r, n: s.log.length, ready: s.myReady }); return; }
+          if (m.i > s.log.length) { this.hello(); return; }
           s.log.push(m.a);
           this.persist();
           this.wake();
@@ -259,6 +306,7 @@
         }
         case 'ready':
           if (m.r !== s.r) return;
+          if (typeof m.money === 'number' && isFinite(m.money)) s.oppMoney = Math.max(0, Math.floor(m.money));
           s.oppReady = true;
           this.persist();
           this.ev.ready();
@@ -266,7 +314,41 @@
         case 'bye':
           this.ev.bye();
           return;
+        case 'deny': // 방장이 거절: 게임머니 부족
+          if (host) return;
+          this.ev.fail(moneyMsg(m.stake || s.stake));
+          return;
+        case 'chat': {
+          const text = cleanText(m.text);
+          if (!text) return;
+          const now = Date.now();
+          this.chatIn = (this.chatIn || []).filter(t => now - t < CHAT_WINDOW_MS);
+          if (this.chatIn.length >= CHAT_BURST * 2) return; // 받는 쪽에서도 지나친 도배는 버림
+          this.chatIn.push(now);
+          this.pushChat({ from: 'opp', text, at: now });
+          return;
+        }
       }
+    }
+
+    pushChat(msg) {
+      const s = this.sess;
+      s.chat = (s.chat || []).concat(msg).slice(-CHAT_KEEP);
+      this.persist();
+      this.ev.chat && this.ev.chat(msg);
+    }
+    // 채팅 보내기. 돌려주는 값: 'ok' | 'empty' | 'offline'(연결 끊김) | 'fast'(도배 막기)
+    sendChat(raw) {
+      const text = cleanText(raw);
+      if (!text) return 'empty';
+      if (!this.connected) return 'offline';
+      const now = Date.now();
+      this.chatOut = (this.chatOut || []).filter(t => now - t < CHAT_WINDOW_MS);
+      if (this.chatOut.length >= CHAT_BURST || (this.chatOut.length && now - this.chatOut[this.chatOut.length - 1] < CHAT_GAP_MS)) return 'fast';
+      if (!this.send({ t: 'chat', text })) return 'offline';
+      this.chatOut.push(now);
+      this.pushChat({ from: 'me', text, at: now });
+      return 'ok';
     }
 
     sendRound() {
@@ -316,7 +398,7 @@
       const s = this.sess;
       s.myReady = true;
       this.persist();
-      this.send({ t: 'ready', r: s.r });
+      this.send({ t: 'ready', r: s.r, money: this.myMoney() });
     }
 
     close(bye) {
@@ -336,7 +418,11 @@
     }
   }
 
-  const api = { swapState, toLocal, applyAction, rebuild, expectedKind, Link, clone };
+  function moneyMsg(stake) {
+    return `게임머니가 부족합니다. 이 방은 점당 ${Number(stake).toLocaleString('ko-KR')}냥이라 그 이상 있어야 들어갈 수 있어요. 미션을 완료해서 게임머니를 얻어보세요.`;
+  }
+
+  const api = { swapState, toLocal, applyAction, rebuild, expectedKind, Link, clone, cleanText, PROTO };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.GSOnline = api;
 })(typeof window !== 'undefined' ? window : this);

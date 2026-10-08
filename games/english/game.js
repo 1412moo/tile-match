@@ -3,7 +3,7 @@
 // 난이도(쉬움·보통·어려움): 단어 수준 + 보기 수 + 철자 조립 도움(첫 글자)/방해(헷갈리는 글자)가 함께 바뀐다.
 (function () {
 'use strict';
-const APP_VERSION = 28; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
 const SAVE_KEY = 'english.save.v1';
 const ROUND = 10;       // 한 판 문제 수
 
@@ -302,6 +302,7 @@ function finish(){
   const d=DIFF[G.diff];
   const xp=Math.round(G.score/2*d.xp);
   G.done=true;
+  if(window.Wallet)window.Wallet.recordPlay('english'); // 오늘의 미션 (한 판 마침)
   const oldLv=level();
   S.xp+=xp;
   if(G.score>S.best)S.best=G.score;

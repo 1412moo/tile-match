@@ -1184,6 +1184,7 @@ console.log('[고스톱 같이 치기] 두 폰이 행동 기록만 주고받아�
   for (let g = 0; g < 500 && bad < 3; g++) {
     const rng = mkRng(777 + g);
     const init = GS.newRound(rng, g % 2, 1);
+    init.stake = 100; init.money = [3000 + g * 7, 1500 + g * 3]; init.rid = 'r' + g; // 방장 기준 [방장, 상대]
     const phones = { host: ON.toLocal(init, 'host'), guest: ON.toLocal(init, 'guest') };
     const log = [];
     for (let step = 0; step < 200 && phones.host.phase !== 'over'; step++) {
@@ -1223,9 +1224,129 @@ console.log('[고스톱 같이 치기] 두 폰이 행동 기록만 주고받아�
     // 정산: 한쪽이 +면 다른 쪽은 - (보너스 점수 포함)
     const hn = GS.netForPlayer(phones.host.over), gn = GS.netForPlayer(phones.guest.over);
     if (hn !== -gn) { bad++; fail(`같이 치기 ${g}판 정산이 맞지 않음 (${hn} / ${gn})`); }
+    // 게임머니: 두 폰이 각자 계산해도 한쪽 +는 다른 쪽 -, 잔액은 0 아래로 안 내려감
+    const hm = GS.moneyDelta(phones.host.over, phones.host.stake, phones.host.money);
+    const gm = GS.moneyDelta(phones.guest.over, phones.guest.stake, phones.guest.money);
+    if (hm !== -gm) { bad++; fail(`같이 치기 ${g}판 게임머니 정산이 다름 (${hm} / ${gm})`); }
+    if (init.money[0] + hm < 0 || init.money[1] - hm < 0) { bad++; fail(`같이 치기 ${g}판 잔액이 음수`); }
     rounds++;
   }
   console.log(`  ${rounds}판 일치 (고/스톱 결정 ${decided}번 포함)`);
+}
+
+console.log('[고스톱 손패 안내 / 두 장 폭탄 / 게임머니 / 오늘의 미션 / 채팅]');
+{
+  const GS = require('../games/gostop/rules.js');
+  const GC = GS.CARDS;
+  const of = m => GC.filter(c => c.month === m).map(c => c.id);
+  const base = () => ({
+    v: 2, deck: [], floor: [], hands: [[], []], captured: [[], []], turn: 0, first: 0, mult: 1,
+    go: [0, 0], goScore: [0, 0], shake: [0, 0], bomb: [0, 0], dummies: [0, 0], shook: [[], []],
+    turnNo: [1, 1], ppeokRun: [0, 0], bonusPts: [0, 0], ppeok: {}, pending: null, phase: 'play', over: null, last: null,
+  });
+  const eq = (name, got, want) => { if (got !== want) fail(`${name}: ${got} (기대 ${want})`); };
+  const bonus = GC.find(c => c.bonus).id;
+  // 손패 안내: 노랑(first) / 회색(later) / 없음(null)
+  let s = base();
+  const [a1, a2] = of(3), [b1, b2, b3, b4] = of(5), [c1, c2, c3, c4] = of(6), [d1, d2, d3, d4] = of(10), e = of(11);
+  s.hands[0] = [a1, b1, c1, d1, bonus, e[0], of(12)[0]];
+  s.floor = [a2, b2, b3, c2, d2];
+  s.captured[1] = [d3, d4];           // 10월: 바닥1 + 손1 + 먹은 패2 = 4장 다 보임
+  s.captured[0] = [e[1], e[2], e[3]]; // 11월: 바닥에 없음
+  eq('짝 있고 상대가 가져갈 수 있음 → 노랑', GS.playHint(s, a1), 'first');
+  eq('바닥 2장 + 손 1장 (1장 남음) → 노랑', GS.playHint(s, b1), 'first');
+  eq('4장 다 보임 → 회색', GS.playHint(s, d1), 'later');
+  eq('보너스패 → 노랑', GS.playHint(s, bonus), 'first');
+  eq('바닥에 짝 없음 → 없음', GS.playHint(s, e[0]), null);
+  eq('바닥에 짝 없음(12월) → 없음', GS.playHint(s, of(12)[0]), null);
+  s.hands[0].push(c3, c4);            // 6월 3장 + 바닥 1장 = 폭탄
+  eq('폭탄 되는 패 → 노랑', GS.playHint(s, c1), 'first');
+  // 뻑으로 바닥에 3장 + 손 1장 → 회색 (아무도 못 가져감)
+  s = base(); const p = of(4); s.floor = [p[0], p[1], p[2]]; s.hands[0] = [p[3]];
+  eq('뻑 3장 + 손 1장 → 회색', GS.playHint(s, p[3]), 'later');
+
+  // 두 장 폭탄: 손 2 + 바닥 2 → 4장 먹기, 상대 피 1장, 폭탄패 1장, 배수 없음
+  s = base(); const keep = of(1)[0], filler = of(2)[0];
+  s.hands[0] = [b1, b4, keep]; s.hands[1] = [of(1)[1]]; s.floor = [b2, b3, of(8)[0]];
+  s.deck = [filler, of(9)[0]]; s.captured[1] = [of(7)[2], of(7)[3]];
+  if (!GS.canBomb2(s, b1) || GS.canBomb(s, b1)) fail('두 장 폭탄 조건 판정');
+  eq('두 장 폭탄 패 안내', GS.playHint(s, b1), 'first');
+  let r = GS.play(s, b1, { bomb: true });
+  if (!r.bomb2) fail('두 장 폭탄이 안 됨');
+  eq('두 장 폭탄 후 손패', s.hands[0].join(), String(keep));
+  eq('두 장 폭탄 폭탄패', s.dummies[0], 1);
+  r = GS.flip(s);
+  if (!r.events.includes('bomb2') || r.events.includes('bomb')) fail('두 장 폭탄 이벤트: ' + r.events);
+  for (const id of [b1, b2, b3, b4]) if (!s.captured[0].includes(id)) fail('두 장 폭탄으로 4장을 못 먹음');
+  eq('두 장 폭탄 피 뺏기', r.stolen.length, 1);
+  eq('두 장 폭탄은 폭탄 배수 아님', s.bomb[0], 0);
+  // '한 장만' 고르면 보통 패처럼 (바닥 2장 중 1장 고르기)
+  s = base(); s.hands[0] = [b1, b4, keep]; s.hands[1] = [of(1)[1]]; s.floor = [b2, b3]; s.deck = [filler, of(9)[0]];
+  r = GS.play(s, b1, { choice: b3 }); GS.flip(s);
+  if (r.bomb || !s.captured[0].includes(b3) || !s.floor.includes(b2) || s.hands[0].length !== 2) fail('두 장 폭탄 대신 한 장만 내기');
+  // 폭탄패(뒤집기만) 사용 → 다음 차례
+  s = base(); s.hands[0] = [b1, b4, keep]; s.hands[1] = [of(1)[1], of(1)[2]]; s.floor = [b2, b3];
+  s.deck = [of(12)[1], of(12)[2], of(9)[1], of(9)[0]];
+  GS.play(s, b1, { bomb: true }); GS.flip(s); GS.endTurn(s);
+  eq('두 장 폭탄 뒤 상대 차례', s.turn, 1);
+  GS.play(s, s.hands[1][0]); GS.flip(s); GS.endTurn(s);
+  GS.playDummy(s); GS.flip(s); GS.endTurn(s);
+  eq('폭탄패 쓴 뒤 남은 폭탄패', s.dummies[0], 0);
+  eq('폭탄패 쓴 뒤 손패 그대로', s.hands[0].length, 1);
+  eq('폭탄패 쓴 뒤 상대 차례', s.turn, 1);
+
+  // 게임머니 정산 = 정산 점수 × 점당, 진 쪽 잔액에서 자름
+  const win = (pts, w, bp) => ({ draw: false, winner: w, points: pts, bonusPts: bp || [0, 0] });
+  eq('7점 × 100냥', GS.moneyDelta(win(7, 0), 100, [5000, 5000]), 700);
+  eq('12점 패배 × 100냥', GS.moneyDelta(win(12, 1), 100, [5000, 5000]), -1200);
+  eq('상대 잔액보다 많이 못 땀', GS.moneyDelta(win(40, 0), 100, [5000, 1500]), 1500);
+  eq('내 잔액보다 많이 안 잃음', GS.moneyDelta(win(40, 1), 100, [800, 5000]), -800);
+  eq('보너스 점수 포함 (첫뻑 7점 받고 5점으로 짐)', GS.moneyDelta(win(5, 1, [7, 0]), 10, [1000, 1000]), 20);
+  eq('나가리 0', GS.moneyDelta({ draw: true, winner: null, points: 0, bonusPts: [0, 0] }, 100, [1, 1]), 0);
+  eq('점당 없음(예전 판)', GS.moneyDelta(win(7, 0), 0, null), 0);
+
+  // 공용 지갑 / 오늘의 미션
+  const WL = require('../wallet.js');
+  let day = new Date(2026, 9, 8, 23, 50);
+  const store = WL.memStore();
+  let w = WL.create(store, () => day);
+  w.ensure();
+  eq('초기 게임머니', w.money(), WL.CONFIG.INITIAL_GAME_MONEY);
+  eq('정산 +', w.add(1200, 'tx1'), 1200);
+  eq('같은 거래 두 번', w.add(1200, 'tx1'), 0);
+  eq('잔액', w.money(), WL.CONFIG.INITIAL_GAME_MONEY + 1200);
+  w.add(-999999, 'tx2');
+  eq('0 아래로 안 내려감', w.money(), 0);
+  eq('조건 전 보상', w.claim('first'), 0);
+  w.recordPlay('gostop');
+  eq('첫 게임 보상', w.claim('first'), 200);
+  eq('같은 날 두 번 받기', w.claim('first'), 0);
+  eq('타일 매치 안 함', w.claim('tile-match'), 0);
+  w.recordPlay('tile-match'); w.recordPlay('english');
+  eq('타일 매치 보상', w.claim('tile-match'), 100);
+  eq('아무 게임 3판 보상', w.claim('any3'), 100);
+  eq('받을 수 있는 미션 수', w.unclaimed(), 1);
+  w = WL.create(store, () => day); // 새로고침
+  eq('새로고침 후 잔액 유지', w.money(), 400);
+  eq('새로고침 후 받은 기록 유지', w.claim('first'), 0);
+  eq('새로고침 후 남은 보상', w.claim('english'), 100);
+  day = new Date(2026, 9, 9, 0, 5); // 자정 지나 다음 날 (로컬 날짜)
+  eq('날짜 바뀌면 진행 초기화', w.missions().every(m => !m.done && !m.claimed), true);
+  eq('날짜 바뀌어도 잔액 유지', w.money(), 500);
+  w.recordPlay('watermelon');
+  eq('다음 날 첫 게임 보상', w.claim('first'), 200);
+  if (WL.today(() => new Date(2026, 0, 2)) !== '2026-01-02') fail('로컬 날짜 형식');
+  const broken = WL.memStore(); broken.setItem(WL.KEY, '{망가진');
+  eq('망가진 저장 → 초기값', WL.create(broken, () => day).money(), WL.CONFIG.INITIAL_GAME_MONEY);
+  if (['gostop.save.v1', 'gostop.online.v1', 'tilematch.save.v1'].includes(WL.KEY)) fail('지갑 저장 키가 게임 저장 키와 겹침');
+
+  // 채팅 글 정리 / 상대 화면으로 뒤집을 때 잔액도 뒤바뀜
+  const ON = require('../games/gostop/online.js');
+  eq('채팅 길이 제한', ON.cleanText('가'.repeat(100)).length, 60);
+  eq('채팅 제어 문자 제거', ON.cleanText('a\u0000b\u0007c'), 'abc');
+  eq('채팅 빈 글', ON.cleanText('   '), '');
+  const t = GS.newRound(() => 0.3, 0, 1); t.money = [100, 200];
+  eq('잔액 뒤집기', ON.swapState(t).money.join(), '200,100');
 }
 
 console.log(failures ? `\n실패 ${failures}건` : '\n모든 테스트 통과');

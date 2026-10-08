@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 11; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'watermelon.save.v1';
   const C = window.WMCore;
   const ART = window.WMArt;
@@ -376,6 +376,7 @@
     const score = G.score;
     const newBest = score > save.best && score > 0;
     save.games = (save.games || 0) + 1;
+    if (window.Wallet) window.Wallet.recordPlay('watermelon'); // 오늘의 미션 (한 판 마침)
     saveGame(); // 끝난 판은 지우고 최고 점수만 남김
     sfx.over();
     if (newBest) sfx.best();

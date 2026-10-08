@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 24; // sw.js 의 VERSION 과 같게 유지
+  const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -17,7 +17,11 @@
   const homeEl = $('#home'), gameEl = $('#game'), overlay = $('#overlay');
 
   // ---------------- 저장 (고스톱 전용 키) ----------------
-  let save = { sound: true, stats: { wins: 0, losses: 0, draws: 0, points: 0 }, current: null, nextFirst: 0, nextMult: 1 };
+  // 게임머니: 내 돈은 공용 지갑(Wallet, hub.wallet.v1), 컴퓨터 돈은 이 게임 저장(cpuMoney)에만 있는 가상 잔액
+  //   stake = 컴퓨터 판 점당 게임머니 (마지막으로 고른 값)
+  const W = window.Wallet, WC = W.CONFIG;
+  let save = { sound: true, stats: { wins: 0, losses: 0, draws: 0, points: 0 }, current: null, nextFirst: 0, nextMult: 1,
+    cpuMoney: WC.INITIAL_GAME_MONEY, stake: WC.DEFAULT_STAKE };
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
@@ -38,6 +42,13 @@
     const o = S.over;
     const net = R.netForPlayer(o);
     save.stats.points += net;
+    // 게임머니 정산 (판마다 한 번: 지갑이 거래 id 로 한 번 더 막음). 예전에 저장된 판(stake 없음)은 정산 없음
+    o.money = 0;
+    if (S.stake && S.rid) {
+      o.money = W.add(R.moneyDelta(o, S.stake, S.money), 'gostop-cpu-' + S.rid);
+      save.cpuMoney = Math.max(0, (save.cpuMoney || 0) - o.money);
+      W.recordPlay('gostop');
+    }
     if (o.draw) {
       save.stats.draws++;
       save.nextMult = Math.min((S.mult || 1) * 2, 16); // 나가리: 다음 판 2배, 선 유지
@@ -56,9 +67,13 @@
     if (!S || !S.over || !net) return;
     const o = S.over, ss = net.sess;
     o.net = R.netForPlayer(o);
+    const rid = net.sess.init && net.sess.init.rid;
+    o.money = S.stake && rid ? R.moneyDelta(o, S.stake, S.money) : 0; // 두 폰이 같은 판 기록으로 같은 값을 계산
     if (ss.recorded === ss.r) return;
     ss.recorded = ss.r;
     ss.stats.points += o.net;
+    if (o.money) W.add(o.money, 'gostop-online-' + rid);
+    W.recordPlay('gostop');
     if (o.draw) ss.stats.draws++; else if (o.winner === 0) ss.stats.wins++; else ss.stats.losses++;
     if (ss.role === 'host') { // 다음 판 선·배수 (방장 기준 = 이 폰 기준)
       if (o.draw) { ss.nextMult = Math.min((S.mult || 1) * 2, 16); ss.nextFirst = S.first; }
@@ -410,11 +425,28 @@
     const mult = $('#round-mult');
     mult.classList.toggle('hidden', (S.mult || 1) <= 1);
     mult.textContent = `판 ×${S.mult}`;
+    // 게임머니: 내 잔액 · 상대 잔액 · 이 판의 점당
+    const mn = moneyNow();
+    $('#stake-tag').classList.toggle('hidden', !mn);
+    $('#stake-tag').textContent = mn ? `점당 ${W.fmt(S.stake)}` : '';
+    $('#my-money').textContent = mn ? W.fmt(mn[0]) : '';
+    $('#opp-money').textContent = mn ? W.fmt(mn[1]) : '';
+    $('#btn-chat').classList.toggle('hidden', !onlineMode);
 
     renderPiles($('#opp-piles'), S.captured[1].concat(view.capAdd[1]));
     renderPiles($('#my-piles'), S.captured[0].concat(view.capAdd[0]));
     renderHand();
     layoutFloor(); // 손패 높이가 정해진 뒤에 바닥 크기를 잰다
+  }
+
+  // 화면에 보일 게임머니 [나, 상대]. 게임머니 없이 시작한 예전 판이면 null
+  //   컴퓨터: 가상 잔액(cpuMoney) / 같이 치기: 판 시작 때 상대 잔액에서 이번 판 정산을 뺀 값
+  function moneyNow() {
+    if (!S || !S.stake) return null;
+    const mine = W.money();
+    if (!onlineMode) return [mine, save.cpuMoney || 0];
+    const o = S.over;
+    return [mine, Math.max(0, (S.money ? S.money[1] : 0) - (o && o.money ? o.money : 0))];
   }
 
   // 전적: '3승 2패 1무 · +12점' (첫 화면은 '누적' 을 붙임)
@@ -424,7 +456,8 @@
   }
 
   function renderHand() {
-    // 내 손패: 월 순서, 바닥에 짝이 있으면 표시, 같은 달 3장이면 표시
+    // 내 손패: 월 순서. 바닥에 짝이 있으면 테두리 - 노랑 = 먼저 낼 패, 회색 = 나중에 내도 되는 패 (R.playHint)
+    // 같은 달 3장이면 표시
     const hand = $('#hand');
     hand.innerHTML = '';
     const myTurn = S.turn === 0 && S.phase === 'play' && !busy;
@@ -433,7 +466,8 @@
     mine.forEach(id => {
       const el = cardEl(id);
       const m = C[id].month;
-      if (myTurn && (C[id].bonus || S.floor.some(f => C[f].month === m))) el.classList.add('match');
+      const hint = myTurn ? R.playHint(S, id) : null;
+      if (hint) el.classList.add(hint === 'first' ? 'match' : 'later');
       if (m && S.hands[0].filter(x => C[x].month === m).length === 3) el.classList.add('three');
       if (selected === id) el.classList.add('sel');
       el.addEventListener('click', () => onHandTap(id));
@@ -609,6 +643,18 @@
         html: '같은 달 3장을 한꺼번에 내서 바닥 패까지 <b>4장</b>을 가져와요.<br>상대 피 1장을 뺏고, 이기면 점수 <b>2배</b>!<div class="show"></div>',
         node: showCards(three), row: true,
         buttons: [{ label: '폭탄!', cls: 'red', value: 'bomb' }, { label: '한 장만', cls: 'light', value: 'one' }],
+      });
+      busy = false;
+      if (seq !== pickSeq || !S) return;
+      opt.bomb = v === 'bomb';
+    } else if (R.canBomb2(S, id)) {
+      busy = true;
+      const two = S.hands[0].filter(x => C[x].month === C[id].month);
+      const v = await ask({
+        emoji: '💣', title: '두 장 폭탄 할까요?',
+        html: '같은 달 2장을 한꺼번에 내서 바닥 패까지 <b>4장</b>을 가져와요.<br>상대 피 1장을 뺏어요. (점수 2배는 없어요)<div class="show"></div>',
+        node: showCards(two), row: true,
+        buttons: [{ label: '두 장 폭탄!', cls: 'red', value: 'bomb' }, { label: '한 장만', cls: 'light', value: 'one' }],
       });
       busy = false;
       if (seq !== pickSeq || !S) return;
@@ -808,7 +854,7 @@
       render();
     } else {
       // 낼 패들의 출발 위치 (내 손패 / 상대 손패 뒷면)
-      const bombCards = opt.bomb && R.canBomb(S, id) ? S.hands[p].filter(x => C[x].month === C[id].month) : [id];
+      const bombCards = opt.bomb && (R.canBomb(S, id) || R.canBomb2(S, id)) ? S.hands[p].filter(x => C[x].month === C[id].month) : [id];
       const from = p === 0 ? bombCards.map(x => FX.rectOf(handEl(x))) : oppBackRects(bombCards.length);
       const hadMatch = S.floor.some(f => same(f, id));
       const shookBefore = S.shake[p];
@@ -830,7 +876,8 @@
       if (res.bomb) { // '타-타-탁' 다음 '쾅!'
         sfx.boom();
         shakeBoard(true);
-        await flash(p === 0 ? '폭탄!' : OPP() + ' 폭탄!', '이기면 점수 2배', 750, 'bomb');
+        const name = res.bomb2 ? '두 장 폭탄!' : '폭탄!';
+        await flash(p === 0 ? name : OPP() + ' ' + name, res.bomb2 ? '4장 모두 가져와요' : '이기면 점수 2배', 750, 'bomb');
         if (S !== game) return;
       }
       await sleep(70);
@@ -1052,22 +1099,35 @@
         `<tr class="total"><td>${win ? '딴 점수' : '잃은 점수'}</td><td>${o.points}점</td></tr>` + bonusRows + netRow + '</table>';
       (win ? sfx.win : sfx.lose)();
     }
+    // 게임머니: 이번 판 증감 + 지금 잔액
+    const mn = moneyNow();
+    const broke = !!mn && mn[0] < S.stake;            // 내 돈이 점당보다 적음 → 한 판 더 못 함
+    const oppBroke = !!mn && onlineMode && mn[1] < S.stake;
+    if (mn) {
+      const d = o.money || 0;
+      html += `<div class="money-box"><div>이번 판 (점당 ${W.fmt(S.stake)})</div>` +
+        `<div class="delta ${d > 0 ? 'plus' : d < 0 ? 'minus' : ''}">${d > 0 ? '+' : d < 0 ? '-' : '±'}${W.fmt(Math.abs(d))}</div>` +
+        `<div class="now">현재 게임머니 <b>${W.fmt(mn[0])}</b></div>` +
+        (broke ? '<div class="now">게임머니가 부족합니다. 미션을 완료해서 게임머니를 얻어보세요.</div>' : '') +
+        (oppBroke && !broke ? `<div class="now">${esc(OPP())} 쪽 게임머니가 부족해서 더 칠 수 없어요.</div>` : '') + '</div>';
+    }
     if (onlineMode && net) {
-      if (net.sess.myReady) { waitNextRound(); return; }
+      if (net.sess.myReady && !broke && !oppBroke) { waitNextRound(); return; }
       showModal({
         emoji, title, html,
         buttons: [
-          { label: '한 판 더', onClick: onlineAgain },
+          broke ? { label: '미션으로 게임머니 얻기', onClick: () => { endOnline(true); goMissions(); } }
+            : oppBroke ? null : { label: '한 판 더', onClick: onlineAgain },
           { label: '그만하기', cls: 'light', onClick: confirmEndOnline },
-        ],
+        ].filter(Boolean),
       });
       return;
     }
     showModal({
       emoji, title, html,
       buttons: [
-        { label: '한 판 더', onClick: startNew },
-        { label: '고스톱 메뉴로', cls: 'light', onClick: goHome },
+        broke ? { label: '미션으로 게임머니 얻기', onClick: goMissions } : { label: '한 판 더', onClick: startNew },
+        { label: '나가기', cls: 'light', onClick: goHome },
       ],
     });
   }
@@ -1152,6 +1212,7 @@
     $('#btn-new').className = save.current ? 'btn light' : 'btn big'; // 하던 판이 없으면 '새 판 시작'이 주 버튼
     const st = save.stats, games = st.wins + st.losses + st.draws;
     $('#record').textContent = games ? recordText('누적 ') : '';
+    $('#home-money').textContent = `🪙 내 게임머니 ${W.fmt(W.money())}`;
     $('#btn-online').textContent = NET.Link.load() ? '📱 같이 치던 판 이어서' : '📱 같이 치기 (각자 폰으로)';
     updateSoundButtons();
   }
@@ -1175,6 +1236,10 @@
     if (S && S.phase !== 'over' && !busy) saveGame();
     if (net) { net.close(false); net = null; } // 같이 치기는 잠시 나감 (기록은 남아 있어 이어서 가능)
     onlineMode = false;
+    closeChat();
+    chatUnread = 0;
+    updateChatDot();
+    document.querySelectorAll('.chat-pop').forEach(el => el.remove());
     setNetStatus('online');
     S = null;
     busy = false;
@@ -1203,10 +1268,73 @@
     showHome();
   });
   window.addEventListener('resize', () => { if (S) render(); });
+  // 메인 화면(미션)에서 뒤로 돌아왔을 때 게임머니 다시 표시
+  window.addEventListener('pageshow', e => { if (e.persisted && !homeEl.classList.contains('hidden')) showHome(); });
 
+  // 컴퓨터와 새 판: 점당은 마지막으로 고른 값. 컴퓨터 가상 잔액이 바닥났으면 초기 자본으로 다시 채움
   async function startNew() {
+    const stake = save.stake || WC.DEFAULT_STAKE;
+    if (!enoughMoney(stake, true)) return;
+    if (!(save.cpuMoney > 0)) save.cpuMoney = WC.INITIAL_GAME_MONEY;
     S = R.newRound(Math.random, save.nextFirst || 0, save.nextMult || 1);
+    stampMoney(S, stake, [W.money(), save.cpuMoney]);
     return beginRound();
+  }
+  // 판에 점당·판 시작 잔액·판 id 를 적어 둔다 (정산은 이 값으로만 - 판 도중에 바뀌지 않음)
+  function stampMoney(s, stake, money) {
+    s.stake = stake;
+    s.money = money;
+    s.rid = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  // 게임머니가 점당보다 적으면 안내 창을 띄우고 false
+  function enoughMoney(stake, canChange) {
+    const have = W.money();
+    if (have >= stake) return true;
+    showModal({
+      emoji: '🪙', title: '게임머니가 부족합니다',
+      html: `지금 게임머니 <b>${W.fmt(have)}</b><br>` +
+        (stake > 1 ? `점당 ${W.fmt(stake)}으로 치려면 ${W.fmt(stake)} 이상 있어야 해요.<br>` : '게임머니가 없으면 방에 들어갈 수 없어요.<br>') +
+        '<b>미션을 완료해서 게임머니를 얻어보세요.</b>',
+      buttons: [{ label: '미션으로 게임머니 얻기', onClick: goMissions }]
+        .concat(canChange && have > 0 ? [{ label: '점당 낮추기', cls: 'light', onClick: () => pickStake('컴퓨터와 치기', startNew) }] : [])
+        .concat([{ label: '닫기', cls: 'light', onClick: () => { if (!S || S.phase === 'over') goHome(); } }]),
+    });
+    return false;
+  }
+  // 메인 화면(오늘의 미션)으로
+  function goMissions() {
+    leaveGame();
+    location.href = '../../#missions';
+  }
+
+  // 점당 게임머니 고르기 (10·50·100·500냥 또는 직접 쓰기)
+  function pickStake(title, onPick) {
+    const cur = save.stake || WC.DEFAULT_STAKE;
+    const custom = !WC.STAKES.includes(cur);
+    showModal({
+      emoji: '🪙', title,
+      html: `내 게임머니 <b>${W.fmt(W.money())}</b><br>1점마다 오가는 게임머니(점당)를 골라 주세요.` +
+        `<div class="stake-chips">${WC.STAKES.map(v => `<button type="button" class="btn light chip${v === cur ? ' on' : ''}" data-v="${v}">${W.fmt(v)}</button>`).join('')}</div>` +
+        `<input id="in-stake" class="text-in" inputmode="numeric" pattern="[0-9]*" maxlength="5" placeholder="직접 쓰기 (1~${WC.MAX_STAKE.toLocaleString('ko-KR')})" value="${custom ? cur : ''}">`,
+      buttons: [
+        { label: '확인', onClick: () => {
+          const typed = $('#in-stake').value.replace(/\D/g, '');
+          const on = overlay.querySelector('.stake-chips .on');
+          const v = typed ? +typed : on ? +on.dataset.v : cur;
+          if (!(v >= 1 && v <= WC.MAX_STAKE)) { toast(`1 ~ ${W.fmt(WC.MAX_STAKE)} 사이로 써 주세요`); pickStake(title, onPick); return; }
+          save.stake = v;
+          persist();
+          onPick(v);
+        } },
+        { label: '취소', cls: 'light', onClick: () => { } },
+      ],
+    });
+    const inp = $('#in-stake');
+    overlay.querySelectorAll('.stake-chips .chip').forEach(b => {
+      b.onclick = () => { overlay.querySelectorAll('.stake-chips .chip').forEach(x => x.classList.toggle('on', x === b)); inp.value = ''; };
+    });
+    inp.oninput = () => { if (inp.value) overlay.querySelectorAll('.stake-chips .chip').forEach(x => x.classList.remove('on')); };
   }
   // S 에 새 판이 들어 있을 때: 패 돌리기 연출부터 첫 차례까지
   async function beginRound() {
@@ -1311,6 +1439,8 @@
         <li>보너스패는 내거나 뒤집어서 먹으면 상대 피 1장을 가져오고, 한 장 더 받아요(뒤집어요).</li>
         <li>쪽·따닥·싹쓸이·뻑 먹기·폭탄: 상대 피 1장 (자뻑 2장)</li>
         <li><b>흔들기</b>(같은 달 3장)·<b>폭탄</b>(3장+바닥 1장): 이기면 2배</li>
+        <li><b>두 장 폭탄</b>(2장+바닥 2장): 4장을 한꺼번에 가져오고 상대 피 1장 (배수는 없음)</li>
+        <li>손패 테두리: <b style="color:#e6c200">노랑</b> = 먼저 낼 패 (상대가 가져갈 수 있음) · <b style="color:#8a9196">회색</b> = 나중에 내도 되는 패</li>
         <li>피박(피로 났을 때 상대 피 7장 이하)·광박·멍따(열끗 7장 이상)·고박: 각각 2배</li>
         <li>총통(같은 달 4장) 10점 · 첫뻑·첫따닥 +7점 · 연뻑 +14점 · 삼연뻑 21점으로 끝</li>
         <li>나가리가 나면 다음 판 점수 2배</li>
@@ -1328,6 +1458,7 @@
     if (show) el.textContent = '📶 ' + (text || '연결하는 중…');
     const ls = document.getElementById('lobby-status');
     if (ls && text) ls.textContent = text;
+    if (chatOpen()) renderChat(); // 끊김/다시 연결을 채팅창에도
   }
 
   function linkEvents() {
@@ -1359,6 +1490,8 @@
         showModal({ emoji: '😥', title: '연결하지 못했어요', html: esc(msg), buttons: [{ label: '확인', onClick: () => { } }] });
       },
       codeChanged: code => { const el = document.getElementById('room-code'); if (el) el.textContent = code; },
+      money: () => W.money(),
+      chat: onChatMsg,
     };
   }
 
@@ -1375,7 +1508,15 @@
     clearBoard();
     onlineMode = true;
     const ss = net.sess;
+    // 두 사람 모두 점당 이상 있어야 시작 (상대 잔액은 인사·한 판 더 때 받은 값)
+    if (ss.stake && W.money() < ss.stake) { endOnline(true); enoughMoney(ss.stake); return; }
+    if (ss.stake && ss.oppMoney !== null && ss.oppMoney < ss.stake) {
+      endOnline(true);
+      showModal({ emoji: '🪙', title: `${esc(ss.oppName || '상대')} 쪽 게임머니가 부족해요`, html: `점당 ${W.fmt(ss.stake)}보다 적어서 더 칠 수 없어요.`, buttons: [{ label: '확인', onClick: () => { } }] });
+      return;
+    }
     S = R.newRound(Math.random, ss.nextFirst || 0, ss.nextMult || 1);
+    if (ss.stake) stampMoney(S, ss.stake, [W.money(), ss.oppMoney || 0]);
     net.startRound(S);
     beginRound();
   }
@@ -1402,6 +1543,7 @@
   }
 
   function onlineAgain() {
+    if (net.sess.stake && W.money() < net.sess.stake) { endOnline(true); enoughMoney(net.sess.stake); return; }
     net.setReady();
     if (net.sess.role === 'host' && net.sess.oppReady) hostNewRound();
     else waitNextRound();
@@ -1443,7 +1585,8 @@
     if (!old) return askName();
     showModal({
       emoji: '📱', title: old.init ? '같이 치던 판이 있어요' : '열어 둔 방이 있어요',
-      html: (old.oppName ? `상대: <b>${esc(old.oppName)}</b><br>` : '') + `방 코드 <b>${esc(old.code)}</b> · 내 이름 <b>${esc(old.myName)}</b>`,
+      html: (old.oppName ? `상대: <b>${esc(old.oppName)}</b><br>` : '') + `방 코드 <b>${esc(old.code)}</b> · 내 이름 <b>${esc(old.myName)}</b>` +
+        (old.stake ? `<br>점당 <b>${W.fmt(old.stake)}</b>` : ''),
       buttons: [
         { label: '이어서 하기', onClick: () => resumeOnline(old) },
         { label: '끝내고 새로 하기', cls: 'light', onClick: () => { NET.Link.clear(); askName(); } },
@@ -1478,7 +1621,11 @@
       emoji: '📱', title: '같이 치기',
       html: '한 사람은 <b>방 만들기</b>, 다른 사람은 <b>방 코드 넣기</b>를 눌러요.<br>두 폰 모두 인터넷이 연결돼 있어야 해요.',
       buttons: [
-        { label: '방 만들기', onClick: () => { startLink(NET.Link.create('host', name)); showRoomCode(); } },
+        { label: '방 만들기', onClick: () => pickStake('방 만들기', stake => {
+          if (!enoughMoney(stake)) return;
+          startLink(NET.Link.create('host', name, null, stake));
+          showRoomCode();
+        }) },
         { label: '방 코드 넣기', onClick: () => joinPrompt(name) },
         { label: '취소', cls: 'light', onClick: () => { } },
       ],
@@ -1488,6 +1635,7 @@
     showModal({
       emoji: '🔑', title: '방 코드',
       html: `<div class="room-code" id="room-code">${esc(net.sess.code)}</div>` +
+        (net.sess.stake ? `<div class="stake-line">점당 <b>${W.fmt(net.sess.stake)}</b> · 내 게임머니 ${W.fmt(W.money())}</div>` : '') +
         '상대 폰에서 <b>같이 치기 → 방 코드 넣기</b>를 누르고<br>이 숫자를 넣어 주세요.' +
         '<p class="net-wait" id="lobby-status">상대를 기다리는 중…</p>',
       buttons: [{ label: '취소', cls: 'light', onClick: () => endOnline(false) }],
@@ -1501,6 +1649,7 @@
     });
   }
   function joinPrompt(name) {
+    if (W.money() <= 0) { enoughMoney(1); return; } // 점당은 들어간 뒤 방장에게서 받아 다시 확인
     showModal({
       emoji: '🔑', title: '방 코드 넣기',
       html: '방을 만든 폰에 보이는 <b>4자리 숫자</b>를 넣어 주세요.' +
@@ -1519,14 +1668,96 @@
     setTimeout(() => inp.focus(), 50);
   }
 
+  // ---------------- 채팅 (같이 치기: 이미 연결된 P2P 통로로 주고받음, 서버 없음) ----------------
+  // 글은 textContent 로만 넣어 HTML·스크립트가 실행되지 않는다. 길이 제한·도배 막기는 online.js(sendChat)에서
+  const QUICK = ['안녕하세요 👋', '잘 부탁해요', '좋아요 👍', '아이고 😅', '잘 쳤어요 👏', '한 판 더?'];
+  let chatUnread = 0, chatPopTimer = 0;
+  const chatOpen = () => !$('#chat').classList.contains('hidden');
+  function chatLine(msg) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg ' + msg.from;
+    if (msg.from === 'opp') {
+      const w = document.createElement('span');
+      w.className = 'who';
+      w.textContent = OPP();
+      el.appendChild(w);
+    }
+    el.appendChild(document.createTextNode(msg.text));
+    return el;
+  }
+  function sysLine(text) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg sys';
+    el.textContent = text;
+    return el;
+  }
+  function renderChat() {
+    const log = $('#chat-log');
+    log.innerHTML = '';
+    const list = (net && net.sess.chat) || [];
+    if (!list.length) log.appendChild(sysLine(`${OPP()} 쪽과 이야기를 나눠 보세요`));
+    list.forEach(m => log.appendChild(chatLine(m)));
+    if (!net || !net.connected) log.appendChild(sysLine('연결이 끊겨 있어요. 다시 연결되면 보낼 수 있어요.'));
+    log.scrollTop = log.scrollHeight;
+  }
+  function updateChatDot() { $('#chat-dot').classList.toggle('hidden', !chatUnread); }
+  function openChat() {
+    if (!net) return;
+    $('#chat').classList.remove('hidden');
+    chatUnread = 0;
+    updateChatDot();
+    renderChat();
+  }
+  function closeChat() {
+    $('#chat').classList.add('hidden');
+    $('#chat-in').blur();
+  }
+  function onChatMsg(msg) {
+    if (chatOpen()) { renderChat(); return; }
+    if (msg.from !== 'opp') return;
+    chatUnread++;
+    updateChatDot();
+    // 채팅창이 닫혀 있으면 위쪽에 잠깐 말풍선
+    document.querySelectorAll('.chat-pop').forEach(el => el.remove());
+    const pop = document.createElement('div');
+    pop.className = 'chat-pop';
+    pop.textContent = `💬 ${OPP()}: ${msg.text}`;
+    document.body.appendChild(pop);
+    clearTimeout(chatPopTimer);
+    chatPopTimer = setTimeout(() => pop.remove(), 2600);
+  }
+  function sendChat(text) {
+    if (!net) return false;
+    const r = net.sendChat(text);
+    if (r === 'offline') toast('연결이 끊겨서 보내지 못했어요');
+    else if (r === 'fast') toast('조금 천천히 보내 주세요');
+    return r === 'ok';
+  }
+  QUICK.forEach(q => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = q;
+    b.addEventListener('click', () => sendChat(q));
+    $('#chat-quick').appendChild(b);
+  });
+  $('#chat-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const inp = $('#chat-in');
+    if (sendChat(inp.value)) inp.value = '';
+  });
+  $('#btn-chat').addEventListener('click', openChat);
+  $('#chat-close').addEventListener('click', closeChat);
+  $('#chat').addEventListener('click', e => { if (e.target.id === 'chat') closeChat(); });
+
   // ---------------- 이벤트 연결 ----------------
   $('#btn-continue').addEventListener('click', () => { sfx.unlock(); resume(); });
+  const newWithStake = () => pickStake('컴퓨터와 치기', startNew);
   $('#btn-new').addEventListener('click', () => {
     sfx.unlock();
-    if (!save.current) return startNew();
+    if (!save.current) return newWithStake();
     showModal({
       emoji: '🎴', title: '새 판을 시작할까요?', html: '하던 판은 지워져요.',
-      buttons: [{ label: '새 판 시작', onClick: startNew }, { label: '취소', cls: 'light', onClick: () => { } }],
+      buttons: [{ label: '새 판 시작', onClick: newWithStake }, { label: '취소', cls: 'light', onClick: () => { } }],
     });
   });
   $('#btn-rules').addEventListener('click', showRules);

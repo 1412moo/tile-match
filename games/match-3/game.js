@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 22; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'match-3.save.v1';
   const M = window.M3;
   const S3 = window.M3S; // 스테이지 데이터 (stages.js)
@@ -629,6 +629,7 @@
     save.current = null;
     persist();
     lastResult = { won, score, before, stars: S3.starsFor(stage, won, score) };
+    if (window.Wallet) window.Wallet.recordPlay('match-3'); // 오늘의 미션 (한 판 마침)
   }
   function showResult() {
     if (!lastResult) recordResult();

@@ -142,11 +142,9 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
   gap: 6px 6px; padding: 4px 8px 10px;
 }
 #hand .hw { --w: var(--hand-w); cursor: pointer; transition: transform .12s; }
-#hand .hw.match { box-shadow: 0 0 0 3px #ffe24a, 0 3px 6px rgba(0, 0, 0, .3); }
-#hand .hw.match::after {
-  content: '짝'; position: absolute; top: -6px; right: -4px; font-size: 12px; font-weight: 900;
-  background: #ffe24a; color: #7a4a00; border-radius: 6px; padding: 1px 4px; box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
-}
+/* 손패 테두리: 노랑 = 먼저 낼 패 (눈에 띄게) / 회색 = 나중에 내도 되는 패 (덜 강조) / 없음 = 바닥에 짝 없음 */
+#hand .hw.match { box-shadow: 0 0 0 3px #ffe24a, 0 0 10px 2px rgba(255, 226, 74, .55), 0 3px 6px rgba(0, 0, 0, .3); }
+#hand .hw.later { box-shadow: 0 0 0 3px #a9b0b5, 0 3px 6px rgba(0, 0, 0, .3); }
 #hand .hw.three::before {
   content: '3장'; position: absolute; top: -6px; left: -4px; font-size: 11px; font-weight: 900;
   background: #d7262e; color: #fff; border-radius: 6px; padding: 1px 4px;
@@ -343,3 +341,47 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 }
 .text-in.code { font-size: 40px; font-weight: 900; letter-spacing: 10px; margin-top: 14px; }
 .text-in:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- 게임머니 ---------- */
+.home-money { margin: 0; font-size: 20px; font-weight: 800; color: #ffe9a8; }
+.home-money:empty { display: none; }
+.stake { font-size: 14px; font-weight: 800; background: rgba(0, 0, 0, .35); color: #ffe9a8; border-radius: 10px; padding: 2px 8px; vertical-align: middle; white-space: nowrap; }
+.money { font-size: 13px; font-weight: 800; white-space: nowrap; padding: 1px 7px; border-radius: 9px; background: rgba(0, 0, 0, .35); color: #ffe24a; }
+.money:empty { display: none; }
+.stake-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 10px; }
+.stake-chips .btn.chip { min-width: 0; padding: 12px 0; font-size: 21px; }
+.stake-chips .btn.chip.on { background: #ffe24a; box-shadow: 0 5px 0 #c9a800; outline: 3px solid #d9621a; }
+.money-box { margin: 12px auto 0; padding: 10px 12px; border-radius: 14px; background: #fff7df; }
+.money-box .delta { font-size: 30px; font-weight: 900; }
+.money-box .delta.plus { color: #d7262e; }
+.money-box .delta.minus { color: #2a52a3; }
+.money-box .now { font-size: 17px; color: #555; }
+.money-box .now b { color: var(--ink); font-size: 20px; }
+
+/* ---------- 채팅 (같이 치기) ---------- */
+#btn-chat { position: relative; }
+.chat-dot { position: absolute; top: 4px; right: 4px; width: 12px; height: 12px; border-radius: 50%; background: #d7262e; box-shadow: 0 0 0 2px #fff; }
+#chat { position: fixed; inset: 0; z-index: 8500; background: rgba(0, 0, 0, .45); display: flex; align-items: flex-end; justify-content: center; }
+.chat-box {
+  width: 100%; max-width: 560px; height: min(70vh, 520px); display: flex; flex-direction: column; gap: 8px;
+  background: #fff; color: var(--ink); border-radius: 22px 22px 0 0; padding: 12px 12px calc(env(safe-area-inset-bottom) + 12px);
+}
+.chat-head { display: flex; align-items: center; justify-content: space-between; font-size: 20px; padding-left: 6px; }
+.chat-head .icon-btn { width: 44px; height: 44px; font-size: 20px; }
+.chat-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; background: #f3f1ec; border-radius: 14px; }
+.chat-msg { max-width: 80%; padding: 8px 12px; border-radius: 16px; font-size: 19px; line-height: 1.35; word-break: break-word; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+.chat-msg.me { align-self: flex-end; background: #ffe24a; }
+.chat-msg.opp { align-self: flex-start; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
+.chat-msg.sys { align-self: center; background: none; color: #888; font-size: 15px; padding: 2px; }
+.chat-msg .who { display: block; font-size: 13px; color: #888; }
+.chat-quick { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.chat-quick button { flex: none; font-size: 17px; font-weight: 700; padding: 8px 12px; border-radius: 14px; background: #eee; color: var(--ink); }
+.chat-form { display: flex; gap: 8px; }
+.chat-form .text-in { flex: 1; min-width: 0; margin: 0; text-align: left; font-size: 19px; padding: 10px 12px; }
+.chat-form .chat-send { min-width: 0; padding: 10px 16px; font-size: 19px; }
+.chat-pop {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 58px); transform: translateX(-50%); z-index: 8400;
+  max-width: 88vw; background: #fff; color: var(--ink); font-size: 18px; font-weight: 700; padding: 8px 14px; border-radius: 16px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .35); pointer-events: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stake-line { font-size: 18px; margin: 0 0 10px; color: #555; }

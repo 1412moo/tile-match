@@ -2,13 +2,13 @@
 // - 온라인: 항상 서버의 최신 파일을 먼저 사용(최대 3초 대기), 받은 파일은 캐시에 저장
 // - 오프라인/응답 없음: 캐시에 저장된 파일로 바로 실행
 // - 게임 진행 데이터(localStorage)는 여기서 절대 건드리지 않는다. 지우는 것은 예전 버전의 파일 캐시뿐.
-const VERSION = 28; // games/registry.js 의 APP_VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 함께 올린다
+const VERSION = 29; // games/registry.js 의 APP_VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 함께 올린다
 const CACHE = 'tilematch-v' + VERSION; // 이름 앞부분은 예전 캐시 정리를 위해 그대로 유지
 
 // 게임 목록에서 준비된 게임의 파일을 가져와 함께 저장한다
 importScripts('games/registry.js');
 const READY_GAMES = (self.GAME_REGISTRY || []).filter(g => g.ready);
-const ASSETS = ['./', 'index.html', 'hub.css', 'hub.js', 'games/registry.js',
+const ASSETS = ['./', 'index.html', 'hub.css', 'hub.js', 'games/registry.js', 'wallet.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png']
   .concat(...READY_GAMES.map(g => g.files.map(f => g.path + f)));
 // 예전 방식(캐시 우선)으로 화면을 띄운 버전들 - 이 버전에서 올라오면 열린 화면을 한 번 새로고침
