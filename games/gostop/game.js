@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 30; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'gostop.save.v1';
   const R = window.GS;
   const C = R.CARDS;
@@ -417,7 +417,7 @@
     const st = save.stats;
     if (onlineMode && net) {
       const os = net.sess.stats;
-      $('#my-record').textContent = os.wins + os.losses + os.draws ? recordText('', os) : '첫 판';
+      $('#my-record').textContent = os.wins + os.losses + os.draws ? recordText(os) : '첫 판';
     } else $('#my-record').textContent = st.wins + st.losses + st.draws ? recordText() : '첫 판';
     $('#opp-who').textContent = onlineMode ? '🙂 ' + OPP() : '🤖 컴퓨터';
     $('#opp-side').classList.toggle('turn', S.turn === 1 && S.phase !== 'over');
@@ -449,10 +449,10 @@
     return [mine, Math.max(0, (S.money ? S.money[1] : 0) - (o && o.money ? o.money : 0))];
   }
 
-  // 전적: '3승 2패 1무 · +12점' (첫 화면은 '누적' 을 붙임)
-  function recordText(pre, stats) {
+  // 전적: '3승 2패 1무' (누적 점수는 게임머니로 대신하므로 보여 주지 않음)
+  function recordText(stats) {
     const st = stats || save.stats;
-    return `${st.wins}승 ${st.losses}패${st.draws ? ` ${st.draws}무` : ''} · ${pre || ''}${st.points >= 0 ? '+' : ''}${st.points}점`;
+    return `${st.wins}승 ${st.losses}패${st.draws ? ` ${st.draws}무` : ''}`;
   }
 
   function renderHand() {
@@ -1211,7 +1211,7 @@
     $('#btn-continue').classList.toggle('hidden', !save.current);
     $('#btn-new').className = save.current ? 'btn light' : 'btn big'; // 하던 판이 없으면 '새 판 시작'이 주 버튼
     const st = save.stats, games = st.wins + st.losses + st.draws;
-    $('#record').textContent = games ? recordText('누적 ') : '';
+    $('#record').textContent = games ? recordText() : '';
     $('#home-money').textContent = `🪙 내 게임머니 ${W.fmt(W.money())}`;
     $('#btn-online').textContent = NET.Link.load() ? '📱 같이 치던 판 이어서' : '📱 같이 치기 (각자 폰으로)';
     updateSoundButtons();
