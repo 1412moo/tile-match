@@ -36,7 +36,7 @@ html, body {
 button { font-family: inherit; cursor: pointer; border: none; }
 
 /* ---------- 홈 ---------- */
-.home-inner { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; text-align: center; }
+.home-inner { margin: auto; max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px; text-align: center; }
 .logo { display: flex; gap: 8px; margin-bottom: 8px; }
 .logo-tile {
   width: 64px; height: 74px; border-radius: 12px; font-size: 40px;
@@ -52,10 +52,10 @@ h1 { margin: 0; font-size: 44px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
   font-size: 22px; font-weight: 700; padding: 16px 28px; border-radius: 18px;
   color: #fff; background: var(--accent);
   box-shadow: 0 5px 0 var(--accent-dark), 0 8px 12px rgba(0, 0, 0, .25);
-  min-width: 220px;
+  min-width: min(220px, 100%);
 }
 .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--accent-dark); }
-.btn.big { font-size: 28px; padding: 20px 36px; min-width: 260px; }
+.btn.big { font-size: 28px; padding: 20px 36px; min-width: min(260px, 100%); }
 .btn.light { background: rgba(255, 255, 255, .92); color: var(--ink); box-shadow: 0 5px 0 rgba(0, 0, 0, .2); font-size: 19px; }
 .btn.light:active { box-shadow: 0 2px 0 rgba(0, 0, 0, .2); }
 

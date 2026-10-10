@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 32; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'match-3.save.v1';
   const M = window.M3;
   const S3 = window.M3S; // 스테이지 데이터 (stages.js)

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = 29; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
+  const APP_VERSION = 32; // sw.js 의 VERSION 이하, 이 게임 HTML 의 ?v= 와 같게
   const SAVE_KEY = 'watermelon.save.v1';
   const C = window.WMCore;
   const ART = window.WMArt;

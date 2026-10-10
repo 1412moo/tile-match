@@ -33,10 +33,10 @@ button { font-family: inherit; cursor: pointer; border: none; }
 /* ---------- 버튼 ---------- */
 .btn {
   font-size: 22px; font-weight: 700; padding: 14px 28px; border-radius: 18px; min-height: 48px;
-  color: #fff; background: var(--accent); box-shadow: 0 5px 0 var(--accent-dark), 0 8px 12px rgba(0, 0, 0, .25); min-width: 220px;
+  color: #fff; background: var(--accent); box-shadow: 0 5px 0 var(--accent-dark), 0 8px 12px rgba(0, 0, 0, .25); min-width: min(220px, 100%);
 }
 .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--accent-dark); }
-.btn.big { font-size: 28px; padding: 16px 36px; min-width: 260px; }
+.btn.big { font-size: 28px; padding: 16px 36px; min-width: min(260px, 100%); }
 .btn small { display: block; font-size: 16px; font-weight: 600; opacity: .9; margin-top: 2px; }
 .btn.light { background: rgba(255, 255, 255, .92); color: var(--ink); box-shadow: 0 5px 0 rgba(0, 0, 0, .2); font-size: 19px; }
 .btn.light:active { box-shadow: 0 2px 0 rgba(0, 0, 0, .2); }
@@ -56,7 +56,7 @@ button { font-family: inherit; cursor: pointer; border: none; }
 }
 
 /* ---------- 첫 화면 ---------- */
-.home-inner { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px 24px 20px; text-align: center; }
+.home-inner { margin: auto; max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px 24px 20px; text-align: center; }
 .logo { display: flex; gap: 6px; margin-bottom: 4px; }
 .logo .hw { --w: 58px; }
 .logo .hw:nth-child(1) { transform: rotate(-8deg) translateY(4px); }
@@ -89,7 +89,7 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 
 .side { margin: 0 6px; padding: 4px 8px; border-radius: 14px; background: rgba(0, 0, 0, .28); cursor: pointer; }
 .side.turn { box-shadow: 0 0 0 3px #ffe24a; }
-.info { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.info { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-height: 30px; } /* 좁은 화면·큰 글씨: 점수가 화면 밖으로 밀리지 않게 줄바꿈 */
 .who { font-size: 16px; font-weight: 800; white-space: nowrap; }
 /* 인게임 내 전적 (😊 나 옆) */
 .rec { font-size: 13px; font-weight: 700; white-space: nowrap; padding: 1px 7px; border-radius: 9px; background: rgba(255, 255, 255, .14); color: #ffe9a8; }
@@ -102,7 +102,7 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 .badge { font-size: 13px; font-weight: 800; padding: 2px 6px; border-radius: 8px; background: #ffe24a; color: #6a4300; white-space: nowrap; }
 .badge.go { background: #ff8a3d; color: #fff; }
 .badge.shake { background: #d7262e; color: #fff; }
-.pts { font-size: 22px; font-weight: 900; min-width: 50px; text-align: right; text-shadow: 0 2px 0 rgba(0, 0, 0, .3); }
+.pts { margin-left: auto; font-size: 22px; font-weight: 900; min-width: 50px; text-align: right; text-shadow: 0 2px 0 rgba(0, 0, 0, .3); }
 
 /* 먹은 패: 광 / 열끗 / 띠 / 피 더미 */
 .piles { display: flex; gap: 6px; align-items: flex-start; min-height: calc(var(--mini-w) * 1.63 + 4px); padding: 2px 0; }
@@ -343,7 +343,7 @@ h1 { margin: 0; font-size: 42px; letter-spacing: 2px; text-shadow: 0 3px 0 rgba(
 .text-in:focus { outline: none; border-color: var(--accent); }
 
 /* ---------- 게임머니 ---------- */
-.home-money { margin: 0; font-size: 20px; font-weight: 800; color: #ffe9a8; }
+.home-money { margin: 0; font-size: 20px; font-weight: 800; color: #ffe9a8; word-break: keep-all; }
 .home-money:empty { display: none; }
 .stake { font-size: 14px; font-weight: 800; background: rgba(0, 0, 0, .35); color: #ffe9a8; border-radius: 10px; padding: 2px 8px; vertical-align: middle; white-space: nowrap; }
 .money { font-size: 13px; font-weight: 800; white-space: nowrap; padding: 1px 7px; border-radius: 9px; background: rgba(0, 0, 0, .35); color: #ffe24a; }

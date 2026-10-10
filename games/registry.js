@@ -8,7 +8,7 @@
 (function (root) {
   'use strict';
   // 앱 전체 버전 (sw.js VERSION, 각 게임 APP_VERSION, HTML 의 ?v= 와 같게 - tools/test.js 가 확인)
-  root.APP_VERSION = 31;
+  root.APP_VERSION = 32;
   root.GAME_REGISTRY = [
     {
       id: 'tile-match',

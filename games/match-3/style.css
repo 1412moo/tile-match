@@ -23,11 +23,11 @@ button { font-family: inherit; cursor: pointer; border: none; }
 
 /* ---------- 버튼 ---------- */
 .btn {
-  font-size: 22px; font-weight: 700; padding: 14px 28px; border-radius: 18px; min-height: 48px; min-width: 220px;
+  font-size: 22px; font-weight: 700; padding: 14px 28px; border-radius: 18px; min-height: 48px; min-width: min(220px, 100%);
   color: #fff; background: var(--accent); box-shadow: 0 5px 0 var(--accent-dark), 0 8px 14px rgba(0, 0, 0, .3);
 }
 .btn:active { transform: translateY(3px); box-shadow: 0 2px 0 var(--accent-dark); }
-.btn.big { font-size: 28px; padding: 16px 36px; min-width: 260px; }
+.btn.big { font-size: 28px; padding: 16px 36px; min-width: min(260px, 100%); }
 .btn small { display: block; font-size: 16px; font-weight: 600; opacity: .9; margin-top: 2px; }
 .btn small:empty { display: none; }
 .btn.light { background: #fff; color: var(--ink); box-shadow: 0 5px 0 rgba(0, 0, 0, .3); font-size: 19px; }
@@ -45,7 +45,7 @@ button { font-family: inherit; cursor: pointer; border: none; }
 
 /* ---------- 첫 화면 ---------- */
 #home { overflow-y: auto; }
-.home-inner { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px 24px 20px; text-align: center; }
+.home-inner { margin: auto; max-width: 100%; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 12px 24px 20px; text-align: center; }
 .logo { display: flex; gap: 4px; }
 .logo svg { width: 46px; height: 46px; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .35)); }
 .logo svg:nth-child(odd) { transform: translateY(6px); }
